@@ -11,6 +11,11 @@ export interface GroupSpec {
   tone?: Tone;
   dashed?: boolean;
   direction?: Direction;
+  /** Explicit panel geometry; required for every node and group in manual mode. */
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
 }
 export interface NodeSpec {
   id: string;
@@ -19,6 +24,12 @@ export interface NodeSpec {
   icon?: string;
   group?: string;
   shape?: Shape;
+  /** Top-left corner in canvas space. Present on every node switches to manual layout. */
+  x?: number;
+  y?: number;
+  /** Minimum box size; captions may still make the node larger. */
+  width?: number;
+  height?: number;
 }
 export interface EdgeSpec {
   id?: string;
@@ -28,6 +39,8 @@ export interface EdgeSpec {
   kind?: EdgeKind;
   fromSide?: Side;
   toSide?: Side;
+  /** Explicit interior bend points for manual layout; endpoints are derived. */
+  via?: Point[];
 }
 export interface DiagramSpec {
   title?: string;
@@ -37,6 +50,12 @@ export interface DiagramSpec {
   edges: EdgeSpec[];
   /** Prefer straight routing along these existing consecutive connections. */
   flow?: string[];
+  /**
+   * `"manual"` places nodes from their explicit `x`/`y` and skips automatic
+   * layout; `"auto"` (the default) ignores no coordinates because none are
+   * allowed. Manual is what reproduces a hand-composed reference.
+   */
+  layout?: "auto" | "manual";
 }
 export interface Point { x: number; y: number }
 export interface Rect extends Point { width: number; height: number }

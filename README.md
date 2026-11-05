@@ -31,9 +31,9 @@ and only in development; production startup errors are not retried.
   light/dark theme toggle.
 - Dragging glides to a stop and zoom eases to its target; starting another gesture
   stops the motion immediately. `prefers-reduced-motion` disables both.
-- The workspace opens on the club architecture (`diagram/club.json`), the
-  coordinate-free equivalent of the traced `out/club-editable.svg` snapshot:
-  same 35 nodes, 34 connections, and 8 nested panels.
+- The workspace opens on the club architecture, traced from
+  `out/club-editable.svg` into `diagram/club.manual.json`: identical panel
+  bounds, card positions, and connector bends (35 nodes, 34 connections).
 - Layout updates after editing; **Ctrl/Cmd + Enter** runs it again.
 - Drag the whiteboard to pan, scroll to zoom, and double-click to fit.
   The dotted background follows the camera and stays at least 20px apart when zoomed out.
@@ -48,7 +48,7 @@ The script is not autosaved. Copy it from the editor before reloading to keep ed
 
 [diagram.schema.json](diagram.schema.json) defines the input; the running site
 serves it at `/schema.json`. Describe groups, nodes, connections, and optional
-semantic preferences—not coordinates:
+semantic preferences—no coordinates needed:
 
 ```json
 {
@@ -81,9 +81,14 @@ semantic preferences—not coordinates:
 | `edges[].kind` | `primary` (blue), `secondary` (gray), or `async` (dashed) |
 | `edges[].fromSide`, `toSide` | Optional `north`, `east`, `south`, or `west` connection anchors |
 | `flow` | Preferred main chain; every consecutive pair must already have a directed connection |
+| `layout` | `auto` (default) or `manual` |
+| `nodes[].x`, `nodes[].y` | Manual placement; required on every node in manual mode |
+| `nodes[].width`, `nodes[].height` | Optional minimum box size; captions may enlarge it |
+| `groups[].x/y/width/height` | Manual panel rectangle; all four required together |
+| `edges[].via` | Manual interior bends; endpoints are derived from node borders |
 
-IDs must be unique and references must resolve. Unknown fields, including pixel
-coordinates, are rejected. `flow` is a preference, not a guarantee of exact
+IDs must be unique and references must resolve. Unknown fields are rejected;
+coordinates are rejected in `auto` mode and required in `manual` mode. `flow` is a preference, not a guarantee of exact
 alignment. A group-specific direction is supported for closed groups; groups
 with connections crossing their boundaries follow the enclosing direction.
 
@@ -93,7 +98,22 @@ self-loops, and disconnected components are supported. Dense graphs can still
 have crossings and long return paths; this is automatic layout, not a promise
 of reproducing a particular hand-arranged composition.
 
-`diagram/club.json` is the coordinate-free reference topology. `src/diagram/`
+## Layout modes
+
+`auto` runs ELK from the graph alone and rejects coordinates. `manual` places
+nodes from their authored `x`/`y`, takes group rectangles verbatim, routes each
+connector through its `via` points, and derives endpoints by intersecting the
+centre-to-centre line with each node's border.
+
+Manual exists because automatic layout cannot reproduce a hand-composed
+reference: ELK honours a group's own `direction` only when that group is laid
+out in a separate run, and a separate run cannot host connectors crossing its
+border. Node boxes are still measured from their captions, so a manual script
+never hand-sizes text; authored `width`/`height` act as minimums.
+
+`diagram/club.json` is the same topology in auto mode, and
+`diagram/club.manual.json` is the traced composition built from
+`diagram/club.drawio`. `src/diagram/`
 contains the layout module, shared theme tokens, and pure SVG/draw.io exporters.
 The website uses the layout and SVG renderer in the browser. The draw.io exporter
 remains available as `renderDrawio(scene, icons)` in `src/diagram/drawio.ts`, without

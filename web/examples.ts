@@ -1,5 +1,6 @@
 import type { DiagramSpec } from "../src/diagram/types";
 import festival from "../diagram/club.json";
+import clubManual from "../diagram/club.manual.json";
 
 const platform: DiagramSpec = {
   title: "Web platform",
@@ -51,11 +52,12 @@ const request: DiagramSpec = {
 };
 
 export const examples = [
-  // The club architecture opens first: it is the traced reference's coordinate-free
-  // equivalent (35 nodes, 34 connections), so the default view matches the original.
-  { id: "club", name: "Club architecture", description: "35 nodes · nested system", spec: festival as DiagramSpec },
+  // Manual mode reproduces the traced reference exactly: same panels, card
+  // positions and connector bends as out/club-editable.svg.
+  { id: "club", name: "Club architecture", description: "Traced · 35 nodes · manual layout", spec: clubManual as DiagramSpec },
   { id: "platform", name: "Web platform", description: "Groups, icons & integrations", spec: platform },
   { id: "request", name: "Request lifecycle", description: "Decisions & branching flows", spec: request },
+  { id: "festival", name: "Festival (auto)", description: "Same topology · automatic layout", spec: festival as DiagramSpec },
 ] as const;
 
 export function scriptFor(index: number) {

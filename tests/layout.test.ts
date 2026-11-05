@@ -646,7 +646,7 @@ describe("layoutDiagram: validation", () => {
     ["an empty node list", { nodes: [], edges: [] }, /nodes: must declare at least one node/],
     ["a missing edge list", { nodes: [{ id: "a", label: "A" }] }, /edges: expected an array/],
     ["an unknown root field", { nodes: [{ id: "a", label: "A" }], edges: [], extra: 1 }, /unknown field "extra"/],
-    ["an unknown node field", { nodes: [{ id: "a", label: "A", width: 100 }], edges: [] }, /nodes\[0\]: unknown field "width"/],
+    ["an unknown node field", { nodes: [{ id: "a", label: "A", colour: "red" }], edges: [] }, /nodes\[0\]: unknown field "colour"/],
     ["an unknown edge field", { nodes: [{ id: "a", label: "A" }], edges: [{ from: "a", to: "a", colour: "red" }] }, /edges\[0\]: unknown field "colour"/],
     ["an invalid direction", { direction: "northwest", nodes: [{ id: "a", label: "A" }], edges: [] }, /direction: expected one of "right", "down", "left", "up"/],
     ["an empty node id", { nodes: [{ id: " ", label: "A" }], edges: [] }, /nodes\[0\]\.id: must not be empty/],

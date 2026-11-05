@@ -1,0 +1,800 @@
+{
+  "title": "Club architecture",
+  "layout": "manual",
+  "groups": [
+    {
+      "id": "cf",
+      "label": "Cloudflare",
+      "x": 196.0,
+      "y": 90.0,
+      "width": 313.0,
+      "height": 980.0,
+      "tone": "warm"
+    },
+    {
+      "id": "dok",
+      "label": "Dokploy Server",
+      "x": 550.0,
+      "y": 40.0,
+      "width": 746.0,
+      "height": 915.0,
+      "tone": "cool"
+    },
+    {
+      "id": "dok.invsys",
+      "label": "Inventory System (SANGISAICF)",
+      "x": 687.0,
+      "y": 90.0,
+      "width": 449.0,
+      "height": 205.0,
+      "tone": "cool",
+      "parent": "dok",
+      "dashed": true
+    },
+    {
+      "id": "dok.pub",
+      "label": "Festival Web (sangifes)",
+      "x": 687.0,
+      "y": 315.0,
+      "width": 586.0,
+      "height": 617.0,
+      "tone": "cool",
+      "parent": "dok",
+      "dashed": true
+    },
+    {
+      "id": "ext",
+      "label": "External Services",
+      "x": 1343.0,
+      "y": 90.0,
+      "width": 175.0,
+      "height": 842.0,
+      "tone": "neutral"
+    },
+    {
+      "id": "backup",
+      "label": "Backup Server (inside WireGuard)",
+      "x": 823.0,
+      "y": 982.0,
+      "width": 450.0,
+      "height": 205.0,
+      "tone": "neutral",
+      "dashed": true
+    },
+    {
+      "id": "ci",
+      "label": "Separate PC (CI)",
+      "x": 1343.0,
+      "y": 982.0,
+      "width": 175.0,
+      "height": 205.0,
+      "tone": "neutral",
+      "dashed": true
+    },
+    {
+      "id": "offline",
+      "label": "Photo Capture (offline)",
+      "x": 40.0,
+      "y": 1109.0,
+      "width": 449.0,
+      "height": 206.0,
+      "tone": "neutral",
+      "dashed": true
+    },
+    {
+      "id": "clients",
+      "label": "Clients",
+      "x": 0.0,
+      "y": 350.0,
+      "width": 180.0,
+      "height": 420.0,
+      "tone": "neutral",
+      "dashed": true
+    }
+  ],
+  "nodes": [
+    {
+      "id": "cf.bak",
+      "label": "Backup",
+      "x": 374.0,
+      "y": 923.0,
+      "subtitle": "Worker",
+      "group": "cf",
+      "icon": "cloudflare-workers"
+    },
+    {
+      "id": "cf.bingo",
+      "label": "Bingo",
+      "x": 374.0,
+      "y": 374.0,
+      "subtitle": "number draw / card check",
+      "group": "cf",
+      "icon": "cloudflare-workers"
+    },
+    {
+      "id": "cf.dns",
+      "label": "DNS / Proxy",
+      "x": 237.0,
+      "y": 511.0,
+      "subtitle": "WAF / Access",
+      "group": "cf",
+      "icon": "cloudflare"
+    },
+    {
+      "id": "cf.mail",
+      "label": "Email Service",
+      "x": 374.0,
+      "y": 649.0,
+      "subtitle": "mail delivery",
+      "group": "cf",
+      "icon": "cloudflare"
+    },
+    {
+      "id": "cf.pages",
+      "label": "Pages",
+      "x": 374.0,
+      "y": 149.0,
+      "subtitle": "2026 archive",
+      "group": "cf",
+      "icon": "cloudflare"
+    },
+    {
+      "id": "cf.r2",
+      "label": "R2",
+      "x": 237.0,
+      "y": 923.0,
+      "subtitle": "backup storage",
+      "group": "cf",
+      "icon": "cloudflare"
+    },
+    {
+      "id": "cf.stamps",
+      "label": "Stamp Rally AR",
+      "x": 237.0,
+      "y": 649.0,
+      "subtitle": "stamp / Worker + D1",
+      "group": "cf",
+      "icon": "cloudflare-workers"
+    },
+    {
+      "id": "cf.status",
+      "label": "Status",
+      "x": 237.0,
+      "y": 149.0,
+      "subtitle": "Worker + DO",
+      "group": "cf",
+      "icon": "cloudflare-workers"
+    },
+    {
+      "id": "cf.turnstile",
+      "label": "Turnstile",
+      "x": 374.0,
+      "y": 786.0,
+      "subtitle": "bot protection",
+      "group": "cf",
+      "icon": "cloudflare"
+    },
+    {
+      "id": "dok.dokploy",
+      "label": "Dokploy",
+      "x": 590.0,
+      "y": 511.0,
+      "subtitle": "Traefik / auto-deploy",
+      "group": "dok",
+      "icon": "dokploy"
+    },
+    {
+      "id": "dok.invsys.inv",
+      "label": "Inventory",
+      "x": 727.0,
+      "y": 149.0,
+      "subtitle": "item / Nuxt",
+      "group": "dok.invsys",
+      "icon": "nuxt"
+    },
+    {
+      "id": "dok.invsys.invcache",
+      "label": "Redis",
+      "x": 1002.0,
+      "y": 149.0,
+      "subtitle": "locks / real-time",
+      "group": "dok.invsys",
+      "icon": "redis"
+    },
+    {
+      "id": "dok.invsys.invdb",
+      "label": "SQLite",
+      "x": 864.0,
+      "y": 149.0,
+      "subtitle": "items / loans",
+      "group": "dok.invsys",
+      "icon": "sqlite"
+    },
+    {
+      "id": "dok.garage",
+      "label": "Garage",
+      "x": 1139.0,
+      "y": 786.0,
+      "subtitle": "images / files",
+      "group": "dok.pub",
+      "icon": "garage"
+    },
+    {
+      "id": "dok.pdb",
+      "label": "PostgreSQL",
+      "x": 864.0,
+      "y": 786.0,
+      "subtitle": "api-db",
+      "group": "dok.pub",
+      "icon": "postgresql"
+    },
+    {
+      "id": "dok.portal",
+      "label": "Student / Committee",
+      "x": 727.0,
+      "y": 649.0,
+      "subtitle": "student / Nuxt UI",
+      "group": "dok.pub",
+      "icon": "nuxt"
+    },
+    {
+      "id": "dok.pss",
+      "label": "Redis",
+      "x": 1002.0,
+      "y": 786.0,
+      "subtitle": "sessions / notifications",
+      "group": "dok.pub",
+      "icon": "redis"
+    },
+    {
+      "id": "dok.pub.apigw",
+      "label": "API",
+      "x": 864.0,
+      "y": 511.0,
+      "subtitle": "api / Nitro",
+      "group": "dok.pub",
+      "icon": "nuxt"
+    },
+    {
+      "id": "dok.pub.site",
+      "label": "Public Site",
+      "x": 727.0,
+      "y": 374.0,
+      "subtitle": "sangifes.com / Nuxt",
+      "group": "dok.pub",
+      "icon": "nuxt"
+    },
+    {
+      "id": "dok.tickets",
+      "label": "Tickets",
+      "x": 1002.0,
+      "y": 511.0,
+      "subtitle": "ticket / Hono \u00d72",
+      "group": "dok.pub",
+      "icon": "hono"
+    },
+    {
+      "id": "dok.tkdb",
+      "label": "PostgreSQL",
+      "x": 1139.0,
+      "y": 511.0,
+      "subtitle": "ticket-db",
+      "group": "dok.pub",
+      "icon": "postgresql"
+    },
+    {
+      "id": "ext.discord",
+      "label": "Discord",
+      "x": 1384.0,
+      "y": 511.0,
+      "subtitle": "incident alerts",
+      "group": "ext",
+      "icon": "discord"
+    },
+    {
+      "id": "ext.flux",
+      "label": "ImageFlux",
+      "x": 1384.0,
+      "y": 649.0,
+      "subtitle": "image processing / CDN",
+      "group": "ext",
+      "icon": "image"
+    },
+    {
+      "id": "ext.ga",
+      "label": "Google Analytics",
+      "x": 1384.0,
+      "y": 786.0,
+      "subtitle": "access analytics",
+      "group": "ext",
+      "icon": "google-analytics"
+    },
+    {
+      "id": "ext.gh",
+      "label": "GitHub",
+      "x": 1384.0,
+      "y": 149.0,
+      "subtitle": "repository / CI",
+      "group": "ext",
+      "icon": "github"
+    },
+    {
+      "id": "ext.google",
+      "label": "Google",
+      "x": 1384.0,
+      "y": 374.0,
+      "subtitle": "login (OAuth)",
+      "group": "ext",
+      "icon": "google"
+    },
+    {
+      "id": "backup.rustfs",
+      "label": "RustFS",
+      "x": 1139.0,
+      "y": 1041.0,
+      "subtitle": "S3 / latest 3 versions",
+      "group": "backup",
+      "icon": "rustfs"
+    },
+    {
+      "id": "backup.wg",
+      "label": "WireGuard",
+      "x": 864.0,
+      "y": 1041.0,
+      "subtitle": "VPN tunnel",
+      "group": "backup",
+      "icon": "wireguard"
+    },
+    {
+      "id": "ci.runner",
+      "label": "Actions Runner",
+      "x": 1384.0,
+      "y": 1041.0,
+      "subtitle": "self-hosted \u00d73",
+      "group": "ci",
+      "icon": "github-actions"
+    },
+    {
+      "id": "offline.card",
+      "label": "SD Card",
+      "x": 80.0,
+      "y": 1168.0,
+      "subtitle": "capture media",
+      "group": "offline",
+      "icon": "hard-drive"
+    },
+    {
+      "id": "offline.mgr",
+      "label": "SD Backup Manager",
+      "x": 217.0,
+      "y": 1168.0,
+      "subtitle": "PC app / Rust",
+      "group": "offline",
+      "icon": "rust"
+    },
+    {
+      "id": "offline.nas",
+      "label": "NAS",
+      "x": 355.0,
+      "y": 1168.0,
+      "subtitle": "capture storage",
+      "group": "offline",
+      "icon": "hard-drive"
+    },
+    {
+      "id": "clients.android",
+      "label": "Inventory Staff",
+      "x": 41.0,
+      "y": 649.0,
+      "subtitle": "FZ-N1 Android",
+      "group": "clients",
+      "icon": "android"
+    },
+    {
+      "id": "clients.pwa",
+      "label": "Organizers / Exhibitors",
+      "x": 41.0,
+      "y": 511.0,
+      "subtitle": "browser",
+      "group": "clients",
+      "shape": "terminal"
+    },
+    {
+      "id": "clients.web",
+      "label": "Visitors",
+      "x": 41.0,
+      "y": 374.0,
+      "subtitle": "browser",
+      "group": "clients",
+      "shape": "terminal"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-visitors-dns",
+      "from": "clients.web",
+      "to": "cf.dns",
+      "label": "HTTPS",
+      "kind": "primary",
+      "via": [
+        {
+          "x": 167.0,
+          "y": 403.0
+        },
+        {
+          "x": 167.0,
+          "y": 525.0
+        }
+      ]
+    },
+    {
+      "id": "edge-organizers-dns",
+      "from": "clients.pwa",
+      "to": "cf.dns",
+      "kind": "primary"
+    },
+    {
+      "id": "edge-inventory-dns",
+      "from": "clients.android",
+      "to": "cf.dns",
+      "kind": "primary",
+      "via": [
+        {
+          "x": 167.0,
+          "y": 678.0
+        },
+        {
+          "x": 167.0,
+          "y": 554.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dns-dokploy",
+      "from": "cf.dns",
+      "to": "dok.dokploy",
+      "label": "HTTPS",
+      "kind": "primary"
+    },
+    {
+      "id": "edge-dns-pages",
+      "from": "cf.dns",
+      "to": "cf.pages",
+      "via": [
+        {
+          "x": 353.0,
+          "y": 525.0
+        },
+        {
+          "x": 353.0,
+          "y": 178.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dns-bingo",
+      "from": "cf.dns",
+      "to": "cf.bingo",
+      "via": [
+        {
+          "x": 353.0,
+          "y": 525.0
+        },
+        {
+          "x": 353.0,
+          "y": 403.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dns-stamps",
+      "from": "cf.dns",
+      "to": "cf.stamps"
+    },
+    {
+      "id": "edge-status-dns",
+      "from": "cf.status",
+      "to": "cf.dns",
+      "label": "External monitor",
+      "kind": "async"
+    },
+    {
+      "id": "edge-dokploy-inventory",
+      "from": "dok.dokploy",
+      "to": "dok.invsys.inv",
+      "via": [
+        {
+          "x": 706.0,
+          "y": 540.0
+        },
+        {
+          "x": 706.0,
+          "y": 178.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dokploy-site",
+      "from": "dok.dokploy",
+      "to": "dok.pub.site",
+      "kind": "primary",
+      "via": [
+        {
+          "x": 706.0,
+          "y": 540.0
+        },
+        {
+          "x": 706.0,
+          "y": 403.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dokploy-api",
+      "from": "dok.dokploy",
+      "to": "dok.pub.apigw",
+      "kind": "primary"
+    },
+    {
+      "id": "edge-dokploy-portal",
+      "from": "dok.dokploy",
+      "to": "dok.portal",
+      "via": [
+        {
+          "x": 706.0,
+          "y": 540.0
+        },
+        {
+          "x": 706.0,
+          "y": 678.0
+        }
+      ]
+    },
+    {
+      "id": "edge-inventory-sqlite",
+      "from": "dok.invsys.inv",
+      "to": "dok.invsys.invdb"
+    },
+    {
+      "id": "edge-inventory-redis",
+      "from": "dok.invsys.inv",
+      "to": "dok.invsys.invcache",
+      "via": [
+        {
+          "x": 774.0,
+          "y": 271.0
+        },
+        {
+          "x": 1049.0,
+          "y": 271.0
+        }
+      ]
+    },
+    {
+      "id": "edge-site-api",
+      "from": "dok.pub.site",
+      "to": "dok.pub.apigw",
+      "label": "/api",
+      "kind": "primary",
+      "via": [
+        {
+          "x": 897.0,
+          "y": 403.0
+        }
+      ]
+    },
+    {
+      "id": "edge-api-tickets",
+      "from": "dok.pub.apigw",
+      "to": "dok.tickets"
+    },
+    {
+      "id": "edge-tickets-db",
+      "from": "dok.tickets",
+      "to": "dok.tkdb"
+    },
+    {
+      "id": "edge-portal-api",
+      "from": "dok.portal",
+      "to": "dok.pub.apigw",
+      "via": [
+        {
+          "x": 887.0,
+          "y": 678.0
+        }
+      ]
+    },
+    {
+      "id": "edge-api-db",
+      "from": "dok.pub.apigw",
+      "to": "dok.pdb"
+    },
+    {
+      "id": "edge-tickets-redis",
+      "from": "dok.tickets",
+      "to": "dok.pss"
+    },
+    {
+      "id": "edge-api-garage",
+      "from": "dok.pub.apigw",
+      "to": "dok.garage",
+      "label": "S3",
+      "via": [
+        {
+          "x": 936.0,
+          "y": 727.0
+        },
+        {
+          "x": 1186.0,
+          "y": 727.0
+        }
+      ]
+    },
+    {
+      "id": "edge-api-mail",
+      "from": "dok.pub.apigw",
+      "to": "cf.mail",
+      "label": "Mail delivery",
+      "via": [
+        {
+          "x": 862.0,
+          "y": 629.0
+        },
+        {
+          "x": 421.0,
+          "y": 629.0
+        }
+      ]
+    },
+    {
+      "id": "edge-api-turnstile",
+      "from": "dok.pub.apigw",
+      "to": "cf.turnstile",
+      "label": "Verify",
+      "via": [
+        {
+          "x": 862.0,
+          "y": 629.0
+        },
+        {
+          "x": 495.0,
+          "y": 629.0
+        },
+        {
+          "x": 495.0,
+          "y": 815.0
+        }
+      ]
+    },
+    {
+      "id": "edge-api-google",
+      "from": "dok.pub.apigw",
+      "to": "ext.google",
+      "label": "OAuth / notifications",
+      "via": [
+        {
+          "x": 931.0,
+          "y": 486.0
+        },
+        {
+          "x": 1431.0,
+          "y": 486.0
+        }
+      ]
+    },
+    {
+      "id": "edge-api-discord",
+      "from": "dok.pub.apigw",
+      "to": "ext.discord",
+      "via": [
+        {
+          "x": 931.0,
+          "y": 486.0
+        },
+        {
+          "x": 1372.0,
+          "y": 486.0
+        },
+        {
+          "x": 1372.0,
+          "y": 540.0
+        }
+      ]
+    },
+    {
+      "id": "edge-imageflux-api",
+      "from": "ext.flux",
+      "to": "dok.pub.apigw",
+      "label": "Image fetch",
+      "via": [
+        {
+          "x": 965.0,
+          "y": 678.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dokploy-backup",
+      "from": "dok.dokploy",
+      "to": "cf.bak",
+      "label": "DB backup",
+      "via": [
+        {
+          "x": 637.0,
+          "y": 952.0
+        }
+      ]
+    },
+    {
+      "id": "edge-dokploy-wireguard",
+      "from": "dok.dokploy",
+      "to": "backup.wg",
+      "label": "Hourly backup",
+      "via": [
+        {
+          "x": 618.0,
+          "y": 1070.0
+        }
+      ]
+    },
+    {
+      "id": "edge-backup-r2",
+      "from": "cf.bak",
+      "to": "cf.r2"
+    },
+    {
+      "id": "edge-wireguard-rustfs",
+      "from": "backup.wg",
+      "to": "backup.rustfs"
+    },
+    {
+      "id": "edge-github-dokploy",
+      "from": "ext.gh",
+      "to": "dok.dokploy",
+      "label": "push \u2192 auto-deploy",
+      "kind": "async",
+      "via": [
+        {
+          "x": 1313.0,
+          "y": 178.0
+        },
+        {
+          "x": 1313.0,
+          "y": 74.0
+        },
+        {
+          "x": 637.0,
+          "y": 74.0
+        }
+      ]
+    },
+    {
+      "id": "edge-github-runner",
+      "from": "ext.gh",
+      "to": "ci.runner",
+      "label": "CI",
+      "kind": "async",
+      "via": [
+        {
+          "x": 1543.0,
+          "y": 178.0
+        },
+        {
+          "x": 1543.0,
+          "y": 1070.0
+        }
+      ]
+    },
+    {
+      "id": "edge-sd-manager",
+      "from": "offline.card",
+      "to": "offline.mgr"
+    },
+    {
+      "id": "edge-manager-nas",
+      "from": "offline.mgr",
+      "to": "offline.nas",
+      "label": "SMB"
+    }
+  ]
+}

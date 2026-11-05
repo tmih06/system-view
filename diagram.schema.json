@@ -1,64 +1,235 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Diagram Studio script",
-  "description": "Describe nodes, nested groups and directed connections without pixel coordinates.",
+  "description": "Describe nodes, nested groups and directed connections. Use automatic layout, or supply explicit geometry for a hand-composed diagram.",
   "type": "object",
-  "required": ["nodes", "edges"],
+  "required": [
+    "nodes",
+    "edges"
+  ],
   "additionalProperties": false,
   "properties": {
-    "title": { "type": "string" },
-    "direction": { "$ref": "#/$defs/direction" },
-    "groups": { "type": "array", "items": { "$ref": "#/$defs/group" } },
-    "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
-    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "title": {
+      "type": "string"
+    },
+    "direction": {
+      "$ref": "#/$defs/direction"
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
     "flow": {
       "type": "array",
-      "description": "Preferred main-flow chain. Consecutive nodes must already have a directed connection. Prefers straight routing; does not add connections or guarantee alignment.",
-      "items": { "type": "string", "minLength": 1 },
+      "description": "Preferred main chain for automatic layout. Consecutive nodes must already have a directed connection. Ignored in manual layout.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "uniqueItems": true
+    },
+    "layout": {
+      "enum": [
+        "auto",
+        "manual"
+      ],
+      "description": "auto (default) computes placement with ELK and rejects coordinates; manual places every node from its x/y and skips ELK entirely."
     }
   },
   "$defs": {
-    "direction": { "enum": ["right", "down", "left", "up"] },
-    "side": { "enum": ["north", "east", "south", "west"] },
+    "direction": {
+      "enum": [
+        "right",
+        "down",
+        "left",
+        "up"
+      ]
+    },
+    "side": {
+      "enum": [
+        "north",
+        "east",
+        "south",
+        "west"
+      ]
+    },
     "group": {
       "type": "object",
-      "required": ["id", "label"],
+      "required": [
+        "id",
+        "label"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "label": { "type": "string", "minLength": 1 },
-        "parent": { "type": "string", "minLength": 1 },
-        "tone": { "enum": ["warm", "cool", "neutral"] },
-        "dashed": { "type": "boolean" },
-        "direction": { "$ref": "#/$defs/direction" }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tone": {
+          "enum": [
+            "warm",
+            "cool",
+            "neutral"
+          ]
+        },
+        "dashed": {
+          "type": "boolean"
+        },
+        "direction": {
+          "$ref": "#/$defs/direction"
+        },
+        "x": {
+          "type": "number",
+          "description": "Panel left edge; manual layout only."
+        },
+        "y": {
+          "type": "number",
+          "description": "Panel top edge; manual layout only."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "node": {
       "type": "object",
-      "required": ["id", "label"],
+      "required": [
+        "id",
+        "label"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "label": { "type": "string", "minLength": 1 },
-        "subtitle": { "type": "string" },
-        "icon": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Local SVG alias, for example cloudflare, redis, hono, postgresql or github." },
-        "group": { "type": "string", "minLength": 1 },
-        "shape": { "enum": ["service", "process", "decision", "terminal"] }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$",
+          "description": "Local SVG alias, for example cloudflare, redis, hono, postgresql or github."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape": {
+          "enum": [
+            "service",
+            "process",
+            "decision",
+            "terminal"
+          ]
+        },
+        "x": {
+          "type": "number",
+          "description": "Node left edge; required in manual layout."
+        },
+        "y": {
+          "type": "number",
+          "description": "Node top edge; required in manual layout."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Minimum box width; captions may make it larger."
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
       }
     },
     "edge": {
       "type": "object",
-      "required": ["from", "to"],
+      "required": [
+        "from",
+        "to"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "from": { "type": "string", "minLength": 1 },
-        "to": { "type": "string", "minLength": 1 },
-        "label": { "type": "string" },
-        "kind": { "enum": ["primary", "secondary", "async"] },
-        "fromSide": { "$ref": "#/$defs/side" },
-        "toSide": { "$ref": "#/$defs/side" }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "primary",
+            "secondary",
+            "async"
+          ]
+        },
+        "fromSide": {
+          "$ref": "#/$defs/side"
+        },
+        "toSide": {
+          "$ref": "#/$defs/side"
+        },
+        "via": {
+          "type": "array",
+          "description": "Explicit interior bend points; endpoints are derived from the node borders.",
+          "items": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            }
+          }
+        }
       }
     }
   }

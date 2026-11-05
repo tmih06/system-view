@@ -103,10 +103,10 @@ const TONES = ["warm", "cool", "neutral"] as const satisfies readonly Tone[];
 const SHAPES = ["service", "process", "decision", "terminal"] as const satisfies readonly Shape[];
 const KINDS = ["primary", "secondary", "async"] as const satisfies readonly EdgeKind[];
 
-const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow"];
-const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction"];
-const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape"];
-const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide"];
+const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow", "layout"];
+const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction", "x", "y", "width", "height"];
+const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape", "x", "y", "width", "height"];
+const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide", "via"];
 
 const DIRECTION_TO_ELK: Record<Direction, string> = {
   right: "RIGHT",
@@ -136,6 +136,8 @@ interface ValidatedGroup {
   tone: Tone;
   dashed: boolean;
   direction?: Direction;
+  /** Explicit panel rectangle in manual mode. */
+  rect?: Rect;
 }
 
 interface ValidatedNode {
@@ -147,6 +149,10 @@ interface ValidatedNode {
   shape: Shape;
   /** Declaration index; used only as a deterministic reading-order hint. */
   order: number;
+  /** Explicit top-left corner and minimum size in manual mode. */
+  at?: Point;
+  minWidth?: number;
+  minHeight?: number;
 }
 
 interface ValidatedEdge {
@@ -158,6 +164,8 @@ interface ValidatedEdge {
   kind: EdgeKind;
   fromSide?: Side;
   toSide?: Side;
+  /** Explicit interior bends in manual mode. */
+  via?: Point[];
 }
 
 interface ValidatedDiagram {
@@ -167,6 +175,7 @@ interface ValidatedDiagram {
   nodes: ValidatedNode[];
   edges: ValidatedEdge[];
   flow: string[];
+  manual: boolean;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -222,6 +231,57 @@ function readOptionalEnum<T extends string>(value: unknown, path: string, allowe
   return value === undefined ? undefined : readEnum(value, path, allowed);
 }
 
+/** Optional `{x,y}`; manual mode requires pairs, so a half-specified point is an error. */
+function readOptionalPoint(value: JsonObject, path: string): Point | undefined {
+  const hasX = value.x !== undefined;
+  const hasY = value.y !== undefined;
+  if (!hasX && !hasY) return undefined;
+  if (hasX !== hasY) fail(path, "x and y must be given together");
+  const x = readNumber(value.x, `${path}.x`);
+  const y = readNumber(value.y, `${path}.y`);
+  return { x, y };
+}
+
+/** Optional `{width,height}`; either may be omitted, but a negative value is an error. */
+function readOptionalSize(value: JsonObject, path: string): { width?: number; height?: number } | undefined {
+  if (value.width === undefined && value.height === undefined) return undefined;
+  const size: { width?: number; height?: number } = {};
+  if (value.width !== undefined) size.width = readNumber(value.width, `${path}.width`);
+  if (value.height !== undefined) size.height = readNumber(value.height, `${path}.height`);
+  return size;
+}
+
+/** Optional `{x,y,width,height}` panel rectangle; all four are required together. */
+function readOptionalRect(value: JsonObject, path: string): Rect | undefined {
+  const fields = ["x", "y", "width", "height"] as const;
+  const present = fields.filter((field) => value[field] !== undefined);
+  if (present.length === 0) return undefined;
+  if (present.length !== fields.length) {
+    fail(path, `group geometry needs all of x, y, width and height; missing ${fields.filter((field) => value[field] === undefined).join(", ")}`);
+  }
+  const rect = {
+    x: readNumber(value.x, `${path}.x`),
+    y: readNumber(value.y, `${path}.y`),
+    width: readNumber(value.width, `${path}.width`),
+    height: readNumber(value.height, `${path}.height`),
+  };
+  if (rect.width <= 0 || rect.height <= 0) fail(path, "group width and height must be positive");
+  return rect;
+}
+
+/**
+ * Read a finite number.
+ *
+ * Layout geometry is pixel data, so non-finite values are rejected rather than
+ * coerced: a NaN coordinate would silently blank part of the canvas.
+ */
+function readNumber(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    fail(path, `expected a finite number, received ${describeValue(value)}`);
+  }
+  return value;
+}
+
 function readArray(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) fail(path, `expected an array, received ${describeValue(value)}`);
   return value;
@@ -244,6 +304,7 @@ function validateDiagram(input: unknown): ValidatedDiagram {
 
   const title = root.title === undefined ? "" : readString(root.title, "title", false);
   const direction = root.direction === undefined ? "right" : readEnum(root.direction, "direction", DIRECTIONS);
+  const manual = root.layout === "manual";
 
   const rawGroups = root.groups === undefined ? [] : readArray(root.groups, "groups");
   const rawNodes = readArray(root.nodes, "nodes");
@@ -265,6 +326,9 @@ function validateDiagram(input: unknown): ValidatedDiagram {
       dashed: value.dashed === undefined ? false : readBoolean(value.dashed, `${path}.dashed`),
       direction: readOptionalEnum(value.direction, `${path}.direction`, DIRECTIONS),
     };
+    const rect = readOptionalRect(value, path);
+    if (rect !== undefined) group.rect = rect;
+    else if (manual) fail(path, "manual layout requires x, y, width and height on every group");
     groups.push(group);
     groupById.set(id, group);
   });
@@ -292,6 +356,9 @@ function validateDiagram(input: unknown): ValidatedDiagram {
     const group = readOptionalString(value.group, `${path}.group`, true);
     if (group !== undefined && !groupById.has(group)) fail(`${path}.group`, `unknown group "${group}"`);
     const subtitle = readOptionalString(value.subtitle, `${path}.subtitle`, false);
+    const at = readOptionalPoint(value, path);
+    const size = readOptionalSize(value, path);
+    if (manual && at === undefined) fail(path, "manual layout requires x and y on every node");
     const node: ValidatedNode = {
       id,
       label: readString(value.label, `${path}.label`, true),
@@ -306,6 +373,8 @@ function validateDiagram(input: unknown): ValidatedDiagram {
             : "service"
           : readEnum(value.shape, `${path}.shape`, SHAPES),
     };
+    if (at !== undefined) node.at = at;
+    if (size !== undefined) { node.minWidth = size.width; node.minHeight = size.height; }
     nodes.push(node);
     nodeById.set(id, node);
   });
@@ -327,7 +396,7 @@ function validateDiagram(input: unknown): ValidatedDiagram {
     if (!nodeById.has(from)) fail(`${path}.from`, `unknown node "${from}"`);
     if (!nodeById.has(to)) fail(`${path}.to`, `unknown node "${to}"`);
     const label = readOptionalString(value.label, `${path}.label`, false);
-    edges.push({
+    const edge: ValidatedEdge = {
       id: explicitId ?? "",
       from,
       to,
@@ -335,7 +404,15 @@ function validateDiagram(input: unknown): ValidatedDiagram {
       kind: value.kind === undefined ? "secondary" : readEnum(value.kind, `${path}.kind`, KINDS),
       fromSide: readOptionalEnum(value.fromSide, `${path}.fromSide`, SIDES),
       toSide: readOptionalEnum(value.toSide, `${path}.toSide`, SIDES),
-    });
+    };
+    if (value.via !== undefined) {
+      edge.via = readArray(value.via, `${path}.via`).map((point, index) => {
+        const entry = readObject(point, `${path}.via[${index}]`);
+        rejectUnknownFields(entry, ["x", "y"], `${path}.via[${index}]`);
+        return { x: readNumber(entry.x, `${path}.via[${index}].x`), y: readNumber(entry.y, `${path}.via[${index}].y`) };
+      });
+    }
+    edges.push(edge);
   });
 
   // Deterministic ids for edges authored without one; explicit ids win and are
@@ -352,7 +429,7 @@ function validateDiagram(input: unknown): ValidatedDiagram {
 
   const flow = root.flow === undefined ? [] : readFlow(root.flow, edges, nodeById);
 
-  return { title, direction, groups, nodes, edges, flow };
+  return { title, direction, groups, nodes, edges, flow, manual };
 }
 
 /** Reject containment cycles such as `a.parent = b` and `b.parent = a`. */
@@ -996,6 +1073,196 @@ function collectEdges(
   return edges;
 }
 
+
+// ---------------------------------------------------------------------------
+// Manual layout
+// ---------------------------------------------------------------------------
+
+/** Grow a measured node to its authored minimum, keeping the card centred. */
+function manualMetrics(node: ValidatedNode, measure: MeasureText): NodeMetrics {
+  const metrics = measureNode(node, measure);
+  const width = Math.max(metrics.width, node.minWidth ?? 0);
+  const height = Math.max(metrics.height, node.minHeight ?? 0);
+  if (width === metrics.width && height === metrics.height) return metrics;
+  return {
+    ...metrics,
+    width,
+    height,
+    card: metrics.card === null ? null : { ...metrics.card, x: (width - metrics.card.width) / 2 },
+    sideY: metrics.card === null ? height / 2 : metrics.card.height / 2,
+  };
+}
+
+/**
+ * Where the segment from a node's centre to `toward` crosses its border.
+ *
+ * Hand-composed references attach connectors at arbitrary points, so anchors are
+ * derived from the direction the connector actually leaves rather than from a
+ * fixed side. A target inside the node falls back to the centre, which keeps
+ * degenerate hand-authored geometry from producing NaN.
+ */
+function borderPoint(rect: Rect, toward: Point): Point {
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const dx = toward.x - cx;
+  const dy = toward.y - cy;
+  if (Math.abs(dx) < EPS && Math.abs(dy) < EPS) return { x: round(cx), y: round(cy) };
+  const scaleX = Math.abs(dx) < EPS ? Infinity : rect.width / 2 / Math.abs(dx);
+  const scaleY = Math.abs(dy) < EPS ? Infinity : rect.height / 2 / Math.abs(dy);
+  const t = Math.min(scaleX, scaleY);
+  return { x: round(cx + dx * t), y: round(cy + dy * t) };
+}
+
+/** Midpoint of the longest segment, used to park a connector label. */
+function labelAnchor(points: Point[]): Point {
+  let best = { point: points[0], length: -1 };
+  for (let index = 1; index < points.length; index += 1) {
+    const a = points[index - 1];
+    const b = points[index];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    if (length > best.length) best = { point: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, length };
+  }
+  return { x: round(best.point.x), y: round(best.point.y) };
+}
+
+/**
+ * Place a hand-composed diagram from its authored coordinates.
+ *
+ * Universe this is the only way to reproduce a traced reference: ELK can honour
+ * a group's own direction only when that group is laid out separately, which
+ * forbids the connectors that cross group borders in such compositions.
+ *
+ * Node boxes are measured from their captions and only enlarged to the authored
+ * minimum, so a manual script never has to hand-size text. Group rectangles are
+ * taken verbatim; containment is the author's responsibility.
+ */
+function layoutManual(
+  diagram: ValidatedDiagram,
+  measureText: MeasureText,
+): Scene {
+  const metricsById = new Map<string, NodeMetrics>();
+  for (const node of diagram.nodes) metricsById.set(node.id, manualMetrics(node, measureText));
+
+  const rectById = new Map<string, Rect>();
+  for (const node of diagram.nodes) {
+    const metrics = metricsById.get(node.id)!;
+    const at = node.at!;
+    rectById.set(node.id, { x: at.x, y: at.y, width: metrics.width, height: metrics.height });
+  }
+
+  const sceneGroups: SceneGroup[] = orderGroups(diagram.groups).map((group) => {
+    const rect = group.rect!;
+    return {
+      id: group.id,
+      parent: group.parent,
+      label: group.label,
+      tone: group.tone,
+      dashed: group.dashed,
+      x: round(rect.x),
+      y: round(rect.y),
+      width: round(rect.width),
+      height: round(rect.height),
+    };
+  });
+
+  const sceneNodes: SceneNode[] = diagram.nodes.map((node) => {
+    const metrics = metricsById.get(node.id)!;
+    const rect = rectById.get(node.id)!;
+    const scene: SceneNode = {
+      id: node.id,
+      parent: node.group,
+      shape: metrics.shape,
+      labelLines: metrics.labelLines,
+      subtitleLines: metrics.subtitleLines,
+      x: round(rect.x),
+      y: round(rect.y),
+      width: round(rect.width),
+      height: round(rect.height),
+    };
+    if (node.icon !== undefined) scene.icon = node.icon;
+    if (metrics.card !== null) {
+      scene.card = {
+        x: round(scene.x + metrics.card.x),
+        y: round(scene.y + metrics.card.y),
+        width: round(metrics.card.width),
+        height: round(metrics.card.height),
+      };
+    }
+    return scene;
+  });
+  const sceneById = new Map(sceneNodes.map((node) => [node.id, node]));
+  const rectOf = (id: string): Rect => sceneById.get(id)!;
+
+  const sceneEdges: SceneEdge[] = diagram.edges.map((edge) => {
+    const from = rectOf(edge.from);
+    const to = rectOf(edge.to);
+    if (edge.from === edge.to) {
+      // A self-loop has no centre-to-centre direction; wrap it around the east side.
+      const x = from.x + from.width;
+      const y = from.y + (edge.toSide === "north" ? 0 : from.height);
+      const loop = [
+        borderPoint(from, { x: x + 30, y }),
+        { x: round(x + 30), y: round(y) },
+        { x: round(x + 30), y: round(from.y + from.height / 2) },
+        borderPoint(from, { x: x + 30, y: from.y + from.height / 2 }),
+      ];
+      const scene: SceneEdge = { id: edge.id, source: edge.from, target: edge.to, kind: edge.kind, points: loop };
+      if (edge.label !== undefined) Object.assign(scene, { label: placeLabel(edge.label, loop, measureText) });
+      return scene;
+    }
+
+    const route = [from, to].map((rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }));
+    const interior = edge.via ?? [];
+    const start = borderPoint(from, interior[0] ?? route[1]);
+    const end = borderPoint(to, interior[interior.length - 1] ?? route[0]);
+    const points = orthogonalize([start, ...interior, end]);
+    if (points.length < 2) throw new Error(`connector "${edge.id}" has no length; move its endpoints apart`);
+    const scene: SceneEdge = { id: edge.id, source: edge.from, target: edge.to, kind: edge.kind, points };
+    if (edge.label !== undefined) Object.assign(scene, { label: placeLabel(edge.label, points, measureText) });
+    return scene;
+  });
+
+  let maxX = 1;
+  let maxY = 1;
+  const extend = (x: number, y: number): void => { maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); };
+  for (const group of sceneGroups) extend(group.x + group.width, group.y + group.height);
+  for (const node of sceneNodes) extend(node.x + node.width, node.y + node.height);
+  for (const edge of sceneEdges) {
+    for (const point of edge.points) extend(point.x, point.y);
+    if (edge.label !== undefined) extend(edge.label.x + edge.label.width, edge.label.y + edge.label.height);
+  }
+
+  return {
+    title: diagram.title,
+    width: round(maxX + ROOT_PAD),
+    height: round(maxY + ROOT_PAD),
+    groups: sceneGroups,
+    nodes: sceneNodes,
+    edges: sceneEdges,
+  };
+}
+
+/**
+ * Connector label box, centred on the route's longest segment.
+ *
+ * Manual scripts author no label geometry, so the text is measured here and
+ * given a box the renderer can centre in; multiline labels keep their line
+ * breaks, which keeps the drawn text identical to the authored string.
+ */
+function placeLabel(text: string, points: Point[], measureText: MeasureText): Rect & { text: string } {
+  const measured = measureTextBlock(text, EDGE_FONT, EDGE_LABEL_WRAP, SUBTITLE_LINE_HEIGHT, measureText);
+  const width = Math.max(1, Math.ceil(measured.width));
+  const height = Math.max(1, Math.ceil(measured.height));
+  const anchor = labelAnchor(points);
+  return {
+    text: measured.lines.join("\n"),
+    x: round(anchor.x - width / 2),
+    y: round(anchor.y - height / 2),
+    width,
+    height,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -1016,6 +1283,7 @@ function collectEdges(
  */
 export async function layoutDiagram(input: unknown, measureText: MeasureText): Promise<Scene> {
   const diagram = validateDiagram(input);
+  if (diagram.manual) return layoutManual(diagram, measureText);
   const parentById = new Map<string, string | undefined>(
     diagram.groups.map((group) => [group.id, group.parent]),
   );

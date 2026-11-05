@@ -31,6 +31,9 @@ and only in development; production startup errors are not retried.
   light/dark theme toggle.
 - Dragging glides to a stop and zoom eases to its target; starting another gesture
   stops the motion immediately. `prefers-reduced-motion` disables both.
+- The workspace opens on the club architecture (`diagram/club.json`), the
+  coordinate-free equivalent of the traced `out/club-editable.svg` snapshot:
+  same 35 nodes, 34 connections, and 8 nested panels.
 - Layout updates after editing; **Ctrl/Cmd + Enter** runs it again.
 - Drag the whiteboard to pan, scroll to zoom, and double-click to fit.
   The dotted background follows the camera and stays at least 20px apart when zoomed out.

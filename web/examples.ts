@@ -51,9 +51,11 @@ const request: DiagramSpec = {
 };
 
 export const examples = [
+  // The club architecture opens first: it is the traced reference's coordinate-free
+  // equivalent (35 nodes, 34 connections), so the default view matches the original.
+  { id: "club", name: "Club architecture", description: "35 nodes · nested system", spec: festival as DiagramSpec },
   { id: "platform", name: "Web platform", description: "Groups, icons & integrations", spec: platform },
   { id: "request", name: "Request lifecycle", description: "Decisions & branching flows", spec: request },
-  { id: "festival", name: "Festival architecture", description: "35 nodes · nested system", spec: festival as DiagramSpec },
 ] as const;
 
 export function scriptFor(index: number) {

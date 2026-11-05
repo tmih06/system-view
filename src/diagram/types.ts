@@ -41,6 +41,14 @@ export interface EdgeSpec {
   toSide?: Side;
   /** Explicit interior bend points for manual layout; endpoints are derived. */
   via?: Point[];
+  /** Manual attachment point on the source box, as fractions of its width/height. */
+  fromAnchor?: Point;
+  /** Manual attachment point on the target box, as fractions of its width/height. */
+  toAnchor?: Point;
+  /** Authored label offset from the route midpoint, in pixels. */
+  labelOffset?: Point;
+  /** Authored absolute label anchor: horizontal centre and text baseline. */
+  labelAt?: Point;
 }
 export interface DiagramSpec {
   title?: string;

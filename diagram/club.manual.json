@@ -100,7 +100,9 @@
       "y": 923.0,
       "subtitle": "Worker",
       "group": "cf",
-      "icon": "cloudflare-workers"
+      "icon": "cloudflare-workers",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.bingo",
@@ -109,7 +111,9 @@
       "y": 374.0,
       "subtitle": "number draw / card check",
       "group": "cf",
-      "icon": "cloudflare-workers"
+      "icon": "cloudflare-workers",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.dns",
@@ -118,7 +122,9 @@
       "y": 511.0,
       "subtitle": "WAF / Access",
       "group": "cf",
-      "icon": "cloudflare"
+      "icon": "cloudflare",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.mail",
@@ -127,7 +133,9 @@
       "y": 649.0,
       "subtitle": "mail delivery",
       "group": "cf",
-      "icon": "cloudflare"
+      "icon": "cloudflare",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.pages",
@@ -136,7 +144,9 @@
       "y": 149.0,
       "subtitle": "2026 archive",
       "group": "cf",
-      "icon": "cloudflare"
+      "icon": "cloudflare",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.r2",
@@ -145,7 +155,9 @@
       "y": 923.0,
       "subtitle": "backup storage",
       "group": "cf",
-      "icon": "cloudflare"
+      "icon": "cloudflare",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.stamps",
@@ -154,7 +166,9 @@
       "y": 649.0,
       "subtitle": "stamp / Worker + D1",
       "group": "cf",
-      "icon": "cloudflare-workers"
+      "icon": "cloudflare-workers",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.status",
@@ -163,7 +177,9 @@
       "y": 149.0,
       "subtitle": "Worker + DO",
       "group": "cf",
-      "icon": "cloudflare-workers"
+      "icon": "cloudflare-workers",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "cf.turnstile",
@@ -172,7 +188,9 @@
       "y": 786.0,
       "subtitle": "bot protection",
       "group": "cf",
-      "icon": "cloudflare"
+      "icon": "cloudflare",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.dokploy",
@@ -181,7 +199,9 @@
       "y": 511.0,
       "subtitle": "Traefik / auto-deploy",
       "group": "dok",
-      "icon": "dokploy"
+      "icon": "dokploy",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.invsys.inv",
@@ -190,7 +210,9 @@
       "y": 149.0,
       "subtitle": "item / Nuxt",
       "group": "dok.invsys",
-      "icon": "nuxt"
+      "icon": "nuxt",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.invsys.invcache",
@@ -199,7 +221,9 @@
       "y": 149.0,
       "subtitle": "locks / real-time",
       "group": "dok.invsys",
-      "icon": "redis"
+      "icon": "redis",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.invsys.invdb",
@@ -208,7 +232,9 @@
       "y": 149.0,
       "subtitle": "items / loans",
       "group": "dok.invsys",
-      "icon": "sqlite"
+      "icon": "sqlite",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.garage",
@@ -217,7 +243,9 @@
       "y": 786.0,
       "subtitle": "images / files",
       "group": "dok.pub",
-      "icon": "garage"
+      "icon": "garage",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.pdb",
@@ -226,7 +254,9 @@
       "y": 786.0,
       "subtitle": "api-db",
       "group": "dok.pub",
-      "icon": "postgresql"
+      "icon": "postgresql",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.portal",
@@ -235,7 +265,9 @@
       "y": 649.0,
       "subtitle": "student / Nuxt UI",
       "group": "dok.pub",
-      "icon": "nuxt"
+      "icon": "nuxt",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.pss",
@@ -244,7 +276,9 @@
       "y": 786.0,
       "subtitle": "sessions / notifications",
       "group": "dok.pub",
-      "icon": "redis"
+      "icon": "redis",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.pub.apigw",
@@ -253,7 +287,9 @@
       "y": 511.0,
       "subtitle": "api / Nitro",
       "group": "dok.pub",
-      "icon": "nuxt"
+      "icon": "nuxt",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.pub.site",
@@ -262,7 +298,9 @@
       "y": 374.0,
       "subtitle": "sangifes.com / Nuxt",
       "group": "dok.pub",
-      "icon": "nuxt"
+      "icon": "nuxt",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.tickets",
@@ -271,7 +309,9 @@
       "y": 511.0,
       "subtitle": "ticket / Hono \u00d72",
       "group": "dok.pub",
-      "icon": "hono"
+      "icon": "hono",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "dok.tkdb",
@@ -280,7 +320,9 @@
       "y": 511.0,
       "subtitle": "ticket-db",
       "group": "dok.pub",
-      "icon": "postgresql"
+      "icon": "postgresql",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "ext.discord",
@@ -289,7 +331,9 @@
       "y": 511.0,
       "subtitle": "incident alerts",
       "group": "ext",
-      "icon": "discord"
+      "icon": "discord",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "ext.flux",
@@ -298,7 +342,9 @@
       "y": 649.0,
       "subtitle": "image processing / CDN",
       "group": "ext",
-      "icon": "image"
+      "icon": "image",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "ext.ga",
@@ -307,7 +353,9 @@
       "y": 786.0,
       "subtitle": "access analytics",
       "group": "ext",
-      "icon": "google-analytics"
+      "icon": "google-analytics",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "ext.gh",
@@ -316,7 +364,9 @@
       "y": 149.0,
       "subtitle": "repository / CI",
       "group": "ext",
-      "icon": "github"
+      "icon": "github",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "ext.google",
@@ -325,7 +375,9 @@
       "y": 374.0,
       "subtitle": "login (OAuth)",
       "group": "ext",
-      "icon": "google"
+      "icon": "google",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "backup.rustfs",
@@ -334,7 +386,9 @@
       "y": 1041.0,
       "subtitle": "S3 / latest 3 versions",
       "group": "backup",
-      "icon": "rustfs"
+      "icon": "rustfs",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "backup.wg",
@@ -343,7 +397,9 @@
       "y": 1041.0,
       "subtitle": "VPN tunnel",
       "group": "backup",
-      "icon": "wireguard"
+      "icon": "wireguard",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "ci.runner",
@@ -352,7 +408,9 @@
       "y": 1041.0,
       "subtitle": "self-hosted \u00d73",
       "group": "ci",
-      "icon": "github-actions"
+      "icon": "github-actions",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "offline.card",
@@ -361,7 +419,9 @@
       "y": 1168.0,
       "subtitle": "capture media",
       "group": "offline",
-      "icon": "hard-drive"
+      "icon": "sd-card",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "offline.mgr",
@@ -370,7 +430,9 @@
       "y": 1168.0,
       "subtitle": "PC app / Rust",
       "group": "offline",
-      "icon": "rust"
+      "icon": "rust",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "offline.nas",
@@ -379,7 +441,9 @@
       "y": 1168.0,
       "subtitle": "capture storage",
       "group": "offline",
-      "icon": "hard-drive"
+      "icon": "hard-drive",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "clients.android",
@@ -388,7 +452,9 @@
       "y": 649.0,
       "subtitle": "FZ-N1 Android",
       "group": "clients",
-      "icon": "android"
+      "icon": "android",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "clients.pwa",
@@ -397,7 +463,9 @@
       "y": 511.0,
       "subtitle": "browser",
       "group": "clients",
-      "shape": "terminal"
+      "icon": "browser-users",
+      "width": 94.0,
+      "height": 104.0
     },
     {
       "id": "clients.web",
@@ -406,7 +474,9 @@
       "y": 374.0,
       "subtitle": "browser",
       "group": "clients",
-      "shape": "terminal"
+      "icon": "browser-user",
+      "width": 94.0,
+      "height": 104.0
     }
   ],
   "edges": [
@@ -416,6 +486,14 @@
       "to": "cf.dns",
       "label": "HTTPS",
       "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.134615
+      },
       "via": [
         {
           "x": 167.0,
@@ -425,19 +503,39 @@
           "x": 167.0,
           "y": 525.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 144.0,
+        "y": 395.0
+      }
     },
     {
       "id": "edge-organizers-dns",
       "from": "clients.pwa",
       "to": "cf.dns",
-      "kind": "primary"
+      "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-inventory-dns",
       "from": "clients.android",
       "to": "cf.dns",
       "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.413462
+      },
       "via": [
         {
           "x": 167.0,
@@ -454,12 +552,32 @@
       "from": "cf.dns",
       "to": "dok.dokploy",
       "label": "HTTPS",
-      "kind": "primary"
+      "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
+      "labelAt": {
+        "x": 461.5,
+        "y": 532.0
+      }
     },
     {
       "id": "edge-dns-pages",
       "from": "cf.dns",
       "to": "cf.pages",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.134615
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 353.0,
@@ -475,6 +593,14 @@
       "id": "edge-dns-bingo",
       "from": "cf.dns",
       "to": "cf.bingo",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.134615
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 353.0,
@@ -489,19 +615,47 @@
     {
       "id": "edge-dns-stamps",
       "from": "cf.dns",
-      "to": "cf.stamps"
+      "to": "cf.stamps",
+      "fromAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      }
     },
     {
       "id": "edge-status-dns",
       "from": "cf.status",
       "to": "cf.dns",
       "label": "External monitor",
-      "kind": "async"
+      "kind": "async",
+      "fromAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      },
+      "labelAt": {
+        "x": 342.0,
+        "y": 383.0
+      }
     },
     {
       "id": "edge-dokploy-inventory",
       "from": "dok.dokploy",
       "to": "dok.invsys.inv",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 706.0,
@@ -518,6 +672,14 @@
       "from": "dok.dokploy",
       "to": "dok.pub.site",
       "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 706.0,
@@ -533,12 +695,28 @@
       "id": "edge-dokploy-api",
       "from": "dok.dokploy",
       "to": "dok.pub.apigw",
-      "kind": "primary"
+      "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-dokploy-portal",
       "from": "dok.dokploy",
       "to": "dok.portal",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 706.0,
@@ -553,12 +731,28 @@
     {
       "id": "edge-inventory-sqlite",
       "from": "dok.invsys.inv",
-      "to": "dok.invsys.invdb"
+      "to": "dok.invsys.invdb",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-inventory-redis",
       "from": "dok.invsys.inv",
       "to": "dok.invsys.invcache",
+      "fromAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
       "via": [
         {
           "x": 774.0,
@@ -576,27 +770,63 @@
       "to": "dok.pub.apigw",
       "label": "/api",
       "kind": "primary",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.351064,
+        "y": -0.038462
+      },
       "via": [
         {
           "x": 897.0,
           "y": 403.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 847.0,
+        "y": 395.0
+      }
     },
     {
       "id": "edge-api-tickets",
       "from": "dok.pub.apigw",
-      "to": "dok.tickets"
+      "to": "dok.tickets",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-tickets-db",
       "from": "dok.tickets",
-      "to": "dok.tkdb"
+      "to": "dok.tkdb",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-portal-api",
       "from": "dok.portal",
       "to": "dok.pub.apigw",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.244681,
+        "y": 1.0
+      },
       "via": [
         {
           "x": 887.0,
@@ -607,18 +837,42 @@
     {
       "id": "edge-api-db",
       "from": "dok.pub.apigw",
-      "to": "dok.pdb"
+      "to": "dok.pdb",
+      "fromAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      }
     },
     {
       "id": "edge-tickets-redis",
       "from": "dok.tickets",
-      "to": "dok.pss"
+      "to": "dok.pss",
+      "fromAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      }
     },
     {
       "id": "edge-api-garage",
       "from": "dok.pub.apigw",
       "to": "dok.garage",
       "label": "S3",
+      "fromAnchor": {
+        "x": 0.765957,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      },
       "via": [
         {
           "x": 936.0,
@@ -628,13 +882,25 @@
           "x": 1186.0,
           "y": 727.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 1117.5,
+        "y": 718.0
+      }
     },
     {
       "id": "edge-api-mail",
       "from": "dok.pub.apigw",
       "to": "cf.mail",
       "label": "Mail delivery",
+      "fromAnchor": {
+        "x": -0.021277,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      },
       "via": [
         {
           "x": 862.0,
@@ -644,13 +910,25 @@
           "x": 421.0,
           "y": 629.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 479.5,
+        "y": 621.0
+      }
     },
     {
       "id": "edge-api-turnstile",
       "from": "dok.pub.apigw",
       "to": "cf.turnstile",
       "label": "Verify",
+      "fromAnchor": {
+        "x": -0.021277,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 862.0,
@@ -664,13 +942,25 @@
           "x": 495.0,
           "y": 815.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 473.0,
+        "y": 806.0
+      }
     },
     {
       "id": "edge-api-google",
       "from": "dok.pub.apigw",
       "to": "ext.google",
       "label": "OAuth / notifications",
+      "fromAnchor": {
+        "x": 0.712766,
+        "y": -0.038462
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
       "via": [
         {
           "x": 931.0,
@@ -680,12 +970,24 @@
           "x": 1431.0,
           "y": 486.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 1207.5,
+        "y": 478.0
+      }
     },
     {
       "id": "edge-api-discord",
       "from": "dok.pub.apigw",
       "to": "ext.discord",
+      "fromAnchor": {
+        "x": 0.712766,
+        "y": -0.038462
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 931.0,
@@ -706,46 +1008,98 @@
       "from": "ext.flux",
       "to": "dok.pub.apigw",
       "label": "Image fetch",
+      "fromAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 1.074468,
+        "y": 1.0
+      },
       "via": [
         {
           "x": 965.0,
           "y": 678.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 1275.0,
+        "y": 670.0
+      }
     },
     {
       "id": "edge-dokploy-backup",
       "from": "dok.dokploy",
       "to": "cf.bak",
       "label": "DB backup",
+      "fromAnchor": {
+        "x": 0.5,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 637.0,
           "y": 952.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 569.0,
+        "y": 944.0
+      }
     },
     {
       "id": "edge-dokploy-wireguard",
       "from": "dok.dokploy",
       "to": "backup.wg",
       "label": "Hourly backup",
+      "fromAnchor": {
+        "x": 0.297872,
+        "y": 1.0
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 618.0,
           "y": 1070.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 748.0,
+        "y": 1062.5
+      }
     },
     {
       "id": "edge-backup-r2",
       "from": "cf.bak",
-      "to": "cf.r2"
+      "to": "cf.r2",
+      "fromAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-wireguard-rustfs",
       "from": "backup.wg",
-      "to": "backup.rustfs"
+      "to": "backup.rustfs",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-github-dokploy",
@@ -753,6 +1107,14 @@
       "to": "dok.dokploy",
       "label": "push \u2192 auto-deploy",
       "kind": "async",
+      "fromAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.5,
+        "y": -0.038462
+      },
       "via": [
         {
           "x": 1313.0,
@@ -766,7 +1128,11 @@
           "x": 637.0,
           "y": 74.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 981.0,
+        "y": 66.0
+      }
     },
     {
       "id": "edge-github-runner",
@@ -774,6 +1140,14 @@
       "to": "ci.runner",
       "label": "CI",
       "kind": "async",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
       "via": [
         {
           "x": 1543.0,
@@ -783,18 +1157,42 @@
           "x": 1543.0,
           "y": 1070.0
         }
-      ]
+      ],
+      "labelAt": {
+        "x": 1503.0,
+        "y": 170.0
+      }
     },
     {
       "id": "edge-sd-manager",
       "from": "offline.card",
-      "to": "offline.mgr"
+      "to": "offline.mgr",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      }
     },
     {
       "id": "edge-manager-nas",
       "from": "offline.mgr",
       "to": "offline.nas",
-      "label": "SMB"
+      "label": "SMB",
+      "fromAnchor": {
+        "x": 0.851064,
+        "y": 0.278846
+      },
+      "toAnchor": {
+        "x": 0.148936,
+        "y": 0.278846
+      },
+      "labelAt": {
+        "x": 333.0,
+        "y": 1189.0
+      }
     }
   ]
 }

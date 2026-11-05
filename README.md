@@ -86,6 +86,8 @@ semantic preferences—no coordinates needed:
 | `nodes[].width`, `nodes[].height` | Optional minimum box size; captions may enlarge it |
 | `groups[].x/y/width/height` | Manual panel rectangle; all four required together |
 | `edges[].via` | Manual interior bends; endpoints are derived from node borders |
+| `edges[].fromAnchor`, `toAnchor` | Manual attachment points as fractions of the source/target box |
+| `edges[].labelAt` | Manual label anchor: horizontal centre and text baseline |
 
 IDs must be unique and references must resolve. Unknown fields are rejected;
 coordinates are rejected in `auto` mode and required in `manual` mode. `flow` is a preference, not a guarantee of exact
@@ -108,8 +110,14 @@ centre-to-centre line with each node's border.
 Manual exists because automatic layout cannot reproduce a hand-composed
 reference: ELK honours a group's own `direction` only when that group is laid
 out in a separate run, and a separate run cannot host connectors crossing its
-border. Node boxes are still measured from their captions, so a manual script
-never hand-sizes text; authored `width`/`height` act as minimums.
+border.
+
+In manual mode the authored `width`/`height` are authoritative rather than
+minimums. Connector anchors are fractions of the authored box, so re-measuring
+a box would move every endpoint off its traced point and make wires overlap or
+double back. Authored polylines are drawn verbatim when they are already
+axis-aligned; a route with a diagonal segment is rewritten as a 90-degree
+staircase, and midpoints that would reverse the direction are collapsed.
 
 `diagram/club.json` is the same topology in auto mode, and
 `diagram/club.manual.json` is the traced composition built from

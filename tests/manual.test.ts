@@ -18,7 +18,7 @@ const measure: MeasureText = (text, font) => {
   return units * size;
 };
 
-const spec = (partial: Record<string, unknown>): DiagramSpec => partial as DiagramSpec;
+const spec = (partial: Record<string, unknown>): DiagramSpec => partial as unknown as DiagramSpec;
 
 describe("layoutDiagram: manual layout", () => {
   test("places every node at its authored corner and keeps the traced composition", async () => {
@@ -40,14 +40,57 @@ describe("layoutDiagram: manual layout", () => {
     expect(scene.height).toBeLessThan(1420);
   });
 
-  test("routes every connector on axis-aligned segments through its authored bends", async () => {
+  test("routes every connector on axis-aligned segments with no U-turns", async () => {
     const scene = await layoutDiagram(club as DiagramSpec, measure);
     for (const edge of scene.edges) {
-      for (let index = 1; index < edge.points.length; index += 1) {
-        const a = edge.points[index - 1];
-        const b = edge.points[index];
+      const points = edge.points;
+      for (let index = 1; index < points.length; index += 1) {
+        const a = points[index - 1];
+        const b = points[index];
         expect(Math.abs(a.x - b.x) < 0.01 || Math.abs(a.y - b.y) < 0.01).toBe(true);
       }
+      for (let index = 2; index < points.length; index += 1) {
+        const a = points[index - 2];
+        const b = points[index - 1];
+        const c = points[index];
+        const first = { x: b.x - a.x, y: b.y - a.y };
+        const second = { x: c.x - b.x, y: c.y - b.y };
+        const lengths = Math.hypot(first.x, first.y) * Math.hypot(second.x, second.y);
+        if (lengths < 1) continue;
+        const dot = (first.x * second.x + first.y * second.y) / lengths;
+        expect(dot).toBeGreaterThan(-0.9);
+      }
+    }
+  });
+
+  test("keeps labels clear of icon cards and of each other", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+      a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+    const labels = scene.edges.flatMap((edge) => (edge.label ? [{ id: edge.id, box: edge.label }] : []));
+    for (const { id, box } of labels) {
+      for (const node of scene.nodes) {
+        expect(overlaps(box, node.card ?? node), `${id} overlaps ${node.id}`).toBe(false);
+      }
+    }
+    for (let index = 0; index < labels.length; index += 1) {
+      for (let other = index + 1; other < labels.length; other += 1) {
+        expect(overlaps(labels[index].box, labels[other].box), `${labels[index].id} overlaps ${labels[other].id}`).toBe(false);
+      }
+    }
+  });
+
+  test("aligns same-group nodes on a common card grid", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    const byGroup = new Map<string, typeof scene.nodes>();
+    for (const node of scene.nodes) {
+      if (!node.parent) continue;
+      byGroup.set(node.parent, [...(byGroup.get(node.parent) ?? []), node]);
+    }
+    for (const nodes of byGroup.values()) {
+      // Uniform card size is what keeps columns and rows visually aligned.
+      const widths = new Set(nodes.map((node) => Math.round(node.card!.width)));
+      expect(widths.size).toBe(1);
     }
   });
 

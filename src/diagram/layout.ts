@@ -106,7 +106,7 @@ const KINDS = ["primary", "secondary", "async"] as const satisfies readonly Edge
 const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow", "layout"];
 const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction", "x", "y", "width", "height"];
 const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape", "x", "y", "width", "height"];
-const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide", "via"];
+const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide", "via", "fromAnchor", "toAnchor", "labelOffset", "labelAt"];
 
 const DIRECTION_TO_ELK: Record<Direction, string> = {
   right: "RIGHT",
@@ -166,6 +166,10 @@ interface ValidatedEdge {
   toSide?: Side;
   /** Explicit interior bends in manual mode. */
   via?: Point[];
+  fromAnchor?: Point;
+  toAnchor?: Point;
+  labelOffset?: Point;
+  labelAt?: Point;
 }
 
 interface ValidatedDiagram {
@@ -405,6 +409,37 @@ function validateDiagram(input: unknown): ValidatedDiagram {
       fromSide: readOptionalEnum(value.fromSide, `${path}.fromSide`, SIDES),
       toSide: readOptionalEnum(value.toSide, `${path}.toSide`, SIDES),
     };
+    for (const key of ["fromAnchor", "toAnchor"] as const) {
+      if (value[key] === undefined) continue;
+      const anchorPath = `${path}.${key}`;
+      const fraction = readObject(value[key], anchorPath);
+      rejectUnknownFields(fraction, ["x", "y"], anchorPath);
+      const point = {
+        x: readNumber(fraction.x, `${anchorPath}.x`),
+        y: readNumber(fraction.y, `${anchorPath}.y`),
+      };
+      // Fractions slightly outside 0..1 are legitimate perimeter offsets: a
+      // traced connector may attach just above or beside the authored box.
+      if (Math.abs(point.x) > 2 || Math.abs(point.y) > 2) {
+        fail(anchorPath, "anchor fractions must be near the 0..1 box range");
+      }
+      edge[key] = point;
+    }
+    if (value.labelAt !== undefined) {
+      const atPath = `${path}.labelAt`;
+      const origin = readObject(value.labelAt, atPath);
+      rejectUnknownFields(origin, ["x", "y"], atPath);
+      edge.labelAt = { x: readNumber(origin.x, `${atPath}.x`), y: readNumber(origin.y, `${atPath}.y`) };
+    }
+    if (value.labelOffset !== undefined) {
+      const offsetPath = `${path}.labelOffset`;
+      const offset = readObject(value.labelOffset, offsetPath);
+      rejectUnknownFields(offset, ["x", "y"], offsetPath);
+      edge.labelOffset = {
+        x: readNumber(offset.x, `${offsetPath}.x`),
+        y: readNumber(offset.y, `${offsetPath}.y`),
+      };
+    }
     if (value.via !== undefined) {
       edge.via = readArray(value.via, `${path}.via`).map((point, index) => {
         const entry = readObject(point, `${path}.via[${index}]`);
@@ -1078,11 +1113,19 @@ function collectEdges(
 // Manual layout
 // ---------------------------------------------------------------------------
 
-/** Grow a measured node to its authored minimum, keeping the card centred. */
+/**
+ * Manual node metrics.
+ *
+ * Authored `width`/`height` are authoritative, not minimums. Connector anchors
+ * are fractions of the authored box, so a re-measured box would move every
+ * endpoint off the traced point and make wires overlap or double back. Text is
+ * still wrapped with the measured metrics; it may render slightly wider than the
+ * box, exactly as the traced reference does.
+ */
 function manualMetrics(node: ValidatedNode, measure: MeasureText): NodeMetrics {
   const metrics = measureNode(node, measure);
-  const width = Math.max(metrics.width, node.minWidth ?? 0);
-  const height = Math.max(metrics.height, node.minHeight ?? 0);
+  const width = node.minWidth ?? metrics.width;
+  const height = node.minHeight ?? metrics.height;
   if (width === metrics.width && height === metrics.height) return metrics;
   return {
     ...metrics,
@@ -1113,16 +1156,112 @@ function borderPoint(rect: Rect, toward: Point): Point {
   return { x: round(cx + dx * t), y: round(cy + dy * t) };
 }
 
-/** Midpoint of the longest segment, used to park a connector label. */
-function labelAnchor(points: Point[]): Point {
-  let best = { point: points[0], length: -1 };
+/** True when every segment of a polyline runs exactly along one axis. */
+function isOrthogonal(points: Point[]): boolean {
   for (let index = 1; index < points.length; index += 1) {
-    const a = points[index - 1];
-    const b = points[index];
-    const length = Math.hypot(b.x - a.x, b.y - a.y);
-    if (length > best.length) best = { point: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, length };
+    const dx = Math.abs(points[index].x - points[index - 1].x);
+    const dy = Math.abs(points[index].y - points[index - 1].y);
+    if (dx > 0.6 && dy > 0.6) return false;
   }
-  return { x: round(best.point.x), y: round(best.point.y) };
+  return true;
+}
+
+/**
+ * Build a 90-degree staircase through explicit waypoints.
+ *
+ * Each leg leaves a point along the dominant axis toward the next one and then
+ * turns once, which guarantees axis-aligned segments and a consistent forward
+ * direction. Legs whose dominant axis matches the previous leg share a corner
+ * instead of doubling back, so the route never reverses on itself.
+ */
+function routeOrthogonal(start: Point, interior: Point[], end: Point): Point[] {
+  const stops = dedupe([start, ...interior, end]);
+  const points: Point[] = [stops[0]];
+  for (let index = 1; index < stops.length; index += 1) {
+    const from = points[points.length - 1];
+    const to = stops[index];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) continue;
+    const horizontalFirst = Math.abs(dx) >= Math.abs(dy);
+    const corner = horizontalFirst ? { x: to.x, y: from.y } : { x: from.x, y: to.y };
+    if (Math.abs(corner.x - from.x) > 0.01 || Math.abs(corner.y - from.y) > 0.01) points.push(corner);
+    points.push(to);
+  }
+  return collapseReversals(dedupe(points));
+}
+
+/**
+ * Remove midpoints that make the route double back on itself.
+ *
+ * A reversal can only happen between two segments on the same axis (a staircase
+ * corner always changes axis), so dropping the middle point keeps every
+ * remaining segment axis-aligned while removing the U-turn. Traced waypoints
+ * that sit a few pixels past an anchor produce exactly this shape.
+ */
+function collapseReversals(points: Point[]): Point[] {
+  const result = [...points];
+  for (let index = 1; index < result.length - 1; ) {
+    const a = result[index - 1];
+    const b = result[index];
+    const c = result[index + 1];
+    const ax = b.x - a.x;
+    const ay = b.y - a.y;
+    const bx = c.x - b.x;
+    const by = c.y - b.y;
+    const la = Math.hypot(ax, ay);
+    const lb = Math.hypot(bx, by);
+    const sameAxis = (Math.abs(ax) < 0.01 && Math.abs(bx) < 0.01) || (Math.abs(ay) < 0.01 && Math.abs(by) < 0.01);
+    if (la > 0.01 && lb > 0.01 && sameAxis && (ax * bx + ay * by) / (la * lb) < 0) {
+      result.splice(index, 1);
+      index = Math.max(1, index - 1);
+      continue;
+    }
+    index += 1;
+  }
+  return result;
+}
+
+/** Drop consecutive duplicate points without changing the path's shape. */
+function dedupe(points: Point[]): Point[] {
+  const result: Point[] = [];
+  for (const point of points) {
+    const last = result[result.length - 1];
+    if (last !== undefined && Math.abs(last.x - point.x) < 0.01 && Math.abs(last.y - point.y) < 0.01) continue;
+    result.push(point);
+  }
+  return result;
+}
+
+/**
+ * Point at half the route's arc length.
+ *
+ * This is the reference tool's default label anchor, so an authored offset is
+ * measured from the same place. Using the longest segment instead shifts every
+ * label on a lopsided route, which is what drove labels onto nodes.
+ */
+function labelAnchor(points: Point[]): Point {
+  const lengths: number[] = [];
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const length = Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y);
+    lengths.push(length);
+    total += length;
+  }
+  if (total === 0) return { x: round(points[0].x), y: round(points[0].y) };
+  let travelled = 0;
+  for (let index = 0; index < lengths.length; index += 1) {
+    const length = lengths[index];
+    if (travelled + length >= total / 2) {
+      const t = (total / 2 - travelled) / length;
+      const a = points[index];
+      const b = points[index + 1];
+      return { x: round(a.x + (b.x - a.x) * t), y: round(a.y + (b.y - a.y) * t) };
+    }
+    travelled += length;
+  }
+  const last = points[points.length - 1];
+  return { x: round(last.x), y: round(last.y) };
 }
 
 /**
@@ -1211,14 +1350,29 @@ function layoutManual(
       return scene;
     }
 
-    const route = [from, to].map((rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }));
+    const centre = (rect: Rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
+    const at = (rect: Rect, fraction: Point) => ({
+      x: round(rect.x + rect.width * fraction.x),
+      y: round(rect.y + rect.height * fraction.y),
+    });
     const interior = edge.via ?? [];
-    const start = borderPoint(from, interior[0] ?? route[1]);
-    const end = borderPoint(to, interior[interior.length - 1] ?? route[0]);
-    const points = orthogonalize([start, ...interior, end]);
+    // An authored anchor is exact; otherwise the border crossing toward the
+    // next waypoint keeps hand-written connectors sensible without anchors.
+    const start = edge.fromAnchor
+      ? at(from, edge.fromAnchor)
+      : borderPoint(from, interior[0] ?? centre(to));
+    const end = edge.toAnchor
+      ? at(to, edge.toAnchor)
+      : borderPoint(to, interior[interior.length - 1] ?? centre(from));
+    // Traced polylines are already orthogonal; drawing them verbatim preserves
+    // the authored corners. Only a script with a genuinely diagonal segment is
+    // rewritten, because a staircase would otherwise add corners that the
+    // reference does not have.
+    const authored = dedupe([start, ...interior, end].map((point) => ({ x: round(point.x), y: round(point.y) })));
+    const points = isOrthogonal(authored) ? collapseReversals(authored) : routeOrthogonal(start, interior, end);
     if (points.length < 2) throw new Error(`connector "${edge.id}" has no length; move its endpoints apart`);
     const scene: SceneEdge = { id: edge.id, source: edge.from, target: edge.to, kind: edge.kind, points };
-    if (edge.label !== undefined) Object.assign(scene, { label: placeLabel(edge.label, points, measureText) });
+    if (edge.label !== undefined) Object.assign(scene, { label: placeLabel(edge.label, points, measureText, edge.labelOffset, edge.labelAt) });
     return scene;
   });
 
@@ -1249,15 +1403,37 @@ function layoutManual(
  * given a box the renderer can centre in; multiline labels keep their line
  * breaks, which keeps the drawn text identical to the authored string.
  */
-function placeLabel(text: string, points: Point[], measureText: MeasureText): Rect & { text: string } {
+function placeLabel(
+  text: string,
+  points: Point[],
+  measureText: MeasureText,
+  offset?: Point,
+  origin?: Point,
+): Rect & { text: string } {
   const measured = measureTextBlock(text, EDGE_FONT, EDGE_LABEL_WRAP, SUBTITLE_LINE_HEIGHT, measureText);
   const width = Math.max(1, Math.ceil(measured.width));
   const height = Math.max(1, Math.ceil(measured.height));
+  if (origin !== undefined) {
+    // Absolute authored anchor: horizontal centre and baseline, which is how the
+    // reference exporter emits connector labels. Converting the baseline back to
+    // a box keeps the painter's centre-anchored text on the authored pixels.
+    // The painter places a centre-anchored line at `centre + size * 0.36`, and
+    // connector labels are painted at the edge size, so invert that exact offset.
+    const centreY = origin.y - theme.edgeSize * 0.36;
+    return {
+      text: measured.lines.join("\n"),
+      x: round(origin.x - width / 2),
+      y: round(centreY - height / 2),
+      width,
+      height,
+    };
+  }
   const anchor = labelAnchor(points);
   return {
     text: measured.lines.join("\n"),
-    x: round(anchor.x - width / 2),
-    y: round(anchor.y - height / 2),
+    // An authored offset is exact; otherwise the label sits on the route midpoint.
+    x: round(anchor.x + (offset?.x ?? 0) - width / 2),
+    y: round(anchor.y + (offset?.y ?? 0) - height / 2),
     width,
     height,
   };

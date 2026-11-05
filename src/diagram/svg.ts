@@ -1,5 +1,5 @@
 import { theme as lightTheme, type Theme } from "./theme";
-import type { EdgeKind, IconMap, Scene, SceneEdge, SceneGroup, SceneNode } from "./types";
+import type { EdgeKind, IconMap, Point, Scene, SceneEdge, SceneGroup, SceneNode } from "./types";
 
 /**
  * Self-contained SVG rendering of an already-laid-out {@link Scene}.
@@ -337,17 +337,60 @@ function renderNode(node: SceneNode, icons: IconMap, palette: Theme): string {
   return renderBodyNode(node, palette);
 }
 
-/** Arrow markers, one per edge paint so markers inherit the right colour. */
-function renderMarkers(palette: Theme): string {
-  const marker = (id: string, color: string) =>
-    `<marker id="${id}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" ` +
-    `orient="auto" markerUnits="userSpaceOnUse">` +
-    `<path d="M 0 0 L 10 5 L 0 10 z" fill="${color}"/></marker>`;
-  return (
-    marker("arrow-primary", palette.primary) +
-    marker("arrow-secondary", palette.secondary) +
-    marker("arrow-async", palette.secondary)
-  );
+/**
+ * Arrowhead geometry shared by painting and by the path trim below.
+ *
+ * `LENGTH` is how far the tip sits past the node edge and `HALF_WIDTH` is the
+ * half-height of the base, giving a slim head that still reads at small zoom.
+ */
+const ARROW_LENGTH = 9;
+const ARROW_HALF_WIDTH = 3.6;
+/**
+ * How far the tip passes the routed endpoint.
+ *
+ * The route ends on the node border; letting the head overshoot by a couple of
+ * pixels closes that seam, so no sliver of stroke or border shows through the
+ * point of the arrow.
+ */
+const ARROW_OVERSHOOT = 2;
+
+/**
+ * Filled arrowhead at the end of a route.
+ *
+ * Drawn as a polygon instead of `marker-end` so the head can extend past the
+ * node border and the line can stop at its base. With a marker the stroke runs
+ * under the head to the tip, and its rounded cap shows through at the point.
+ */
+function renderArrowhead(tip: Point, from: Point, color: string): string {
+  const dx = tip.x - from.x;
+  const dy = tip.y - from.y;
+  const length = Math.hypot(dx, dy);
+  // A zero-length final segment has no direction; fall back to pointing right.
+  const ux = length < 0.001 ? 1 : dx / length;
+  const uy = length < 0.001 ? 0 : dy / length;
+
+  const point = { x: tip.x + ux * ARROW_OVERSHOOT, y: tip.y + uy * ARROW_OVERSHOOT };
+  const base = { x: point.x - ux * ARROW_LENGTH, y: point.y - uy * ARROW_LENGTH };
+  const left = { x: base.x - uy * ARROW_HALF_WIDTH, y: base.y + ux * ARROW_HALF_WIDTH };
+  const right = { x: base.x + uy * ARROW_HALF_WIDTH, y: base.y - ux * ARROW_HALF_WIDTH };
+  const points = [point, left, right].map((vertex) => `${n(vertex.x)},${n(vertex.y)}`).join(" ");
+  return `<polygon points="${points}" fill="${color}"/>`;
+}
+
+/** Trim the final segment to the arrowhead base so the line cannot show at the tip. */
+function trimForArrowhead(points: Point[]): Point[] {
+  const tip = points[points.length - 1];
+  const previous = points[points.length - 2];
+  const dx = tip.x - previous.x;
+  const dy = tip.y - previous.y;
+  const length = Math.hypot(dx, dy);
+  if (length <= ARROW_LENGTH) return points;
+  // Stop at the head's base, which already includes the overshoot.
+  const stop = {
+    x: tip.x - (dx / length) * (ARROW_LENGTH - ARROW_OVERSHOOT),
+    y: tip.y - (dy / length) * (ARROW_LENGTH - ARROW_OVERSHOOT),
+  };
+  return [...points.slice(0, -1), stop];
 }
 
 /**
@@ -389,13 +432,15 @@ function renderEdge(edge: SceneEdge, nodeIds: Set<string>, palette: Theme): stri
     throw new Error(`renderSvg: edge "${edge.id}" references unknown target node "${edge.target}"`);
   }
   const style = edgeStyle(edge.kind, palette);
-  const marker = `arrow-${edge.kind}`;
   const dash = style.dash ? ` stroke-dasharray="${style.dash}"` : "";
-  const d = edge.points.map((point, index) => `${index === 0 ? "M" : "L"} ${n(point.x)} ${n(point.y)}`).join(" ");
+  const tip = edge.points[edge.points.length - 1];
+  const line = trimForArrowhead(edge.points);
+  const d = line.map((point, index) => `${index === 0 ? "M" : "L"} ${n(point.x)} ${n(point.y)}`).join(" ");
   const path =
     `<path d="${d}" fill="none" stroke="${style.color}" stroke-width="${style.width}" ` +
-    `stroke-linejoin="round" stroke-linecap="round"${dash} marker-end="url(#${marker})"/>`;
-  return `<g data-edge="${escapeXml(edge.id)}" data-kind="${edge.kind}">${path}${renderEdgeLabel(edge, palette)}</g>`;
+    `stroke-linejoin="round" stroke-linecap="butt"${dash}/>`;
+  const arrowhead = renderArrowhead(tip, line[line.length - 1], style.color);
+  return `<g data-edge="${escapeXml(edge.id)}" data-kind="${edge.kind}">${path}${arrowhead}${renderEdgeLabel(edge, palette)}</g>`;
 }
 
 /**
@@ -414,7 +459,6 @@ export function renderSvg(scene: Scene, icons: IconMap, options: SvgRenderOption
   const height = Number.isFinite(scene.height) ? Math.max(1, scene.height) : 1;
 
   const palette = options.palette ?? lightTheme;
-  const markers = renderMarkers(palette);
   // With `grid: false` neither the pattern nor the backdrop rects are emitted:
   // the canvas must stay transparent so a host page's own graph paper shows
   // through, and an unused pattern def would only add weight.
@@ -433,7 +477,7 @@ export function renderSvg(scene: Scene, icons: IconMap, options: SvgRenderOption
     `width="${n(width)}" height="${n(height)}" viewBox="0 0 ${n(width)} ${n(height)}" role="img">` +
     `<title>${escapeXml(scene.title || "Diagram")}</title>` +
     `<desc>${escapeXml(`Diagram with ${scene.nodes.length} nodes and ${scene.edges.length} connections.`)}</desc>` +
-    `<defs>${markers}${gridLayer ? gridLayer.pattern : ""}</defs>` +
+    `<defs>${gridLayer ? gridLayer.pattern : ""}</defs>` +
     (gridLayer ? gridLayer.body : "") +
     groups +
     edges +

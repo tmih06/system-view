@@ -54,6 +54,11 @@ geometry, which is why a theme switch can recolour without re-running layout.
 
 ## Invariants that must stay true
 
+- **A composed canvas routes crossing connectors around cards.** A wire that
+  crosses panel borders is drawn by `routeAround`, a visibility-grid search that
+  treats cards and non-incident panels as obstacles. A naive L or Z shape cuts
+  through whatever sits between the two cards, which is why the search exists; a
+  test asserts no segment crosses a node it does not connect.
 - **`Scene` is theme-independent.** Layout uses the light `theme` metrics;
   palettes only change paint. `tests/render.test.ts` pins this: both palettes
   must emit identical path data.
@@ -81,17 +86,28 @@ geometry, which is why a theme switch can recolour without re-running layout.
 
 ## Layout modes
 
-`auto` runs ELK from the graph alone. Useful mental model:
+`auto` has two strategies, chosen by graph shape. A canvas holding **two or more
+panels** is composed in layers: one ELK run per panel decides its interior (so
+each honours its own `direction` and a card-heavy panel wraps into a grid), then
+one run places those panels as fixed boxes. A single panel or a plain node graph
+uses one run, which is simpler and is what the existing tests cover.
+
+The split exists because the two features cannot coexist in one run: ELK honours
+a group's `direction` only when that group is its own run, and its wrapping
+pipeline throws as soon as a connector crosses the border of a wrapped group.
+
+Useful mental model:
 
 - The layered algorithm places nodes in layers along `direction` and routes
   orthogonally.
 - Ports are pinned per side (`FIXED_POS`), so east/west endpoints sit at icon-card
   height rather than the middle of the taller caption box. `trimToCard` then pulls
   endpoints onto the visible card edge so a wire does not stop beside the caption.
-- A group's own `direction` is honoured only when the group is *closed* — no
-  connector crosses its border, directly or through a nested group. ELK cannot
-  lay out a self-directed subtree in its own run and still route crossing
-  connectors, so an open group follows the enclosing direction.
+- In the one-run strategy a group's own `direction` is honoured only when the
+  group is *closed* — no connector crosses its border, directly or through a
+  nested group. ELK cannot lay out a self-directed subtree in its own run and
+  still route crossing connectors, so an open group follows the enclosing
+  direction. The composed strategy has no such limit.
 - `flow` raises routing priority along the declared chain. It never adds an edge
   and never guarantees exact alignment.
 
@@ -106,7 +122,8 @@ as a 90° staircase, and midpoints that would reverse direction are collapsed.
 | Path | Role |
 |---|---|
 | `src/diagram/types.ts` | The shared contract: spec, scene, and geometry types. |
-| `src/diagram/layout.ts` | Validation, measurement, ELK integration, both layout modes. |
+| `src/diagram/layout.ts` | Validation, measurement, both layout modes, and the two auto strategies. |
+| `src/diagram/elk.ts` | ELK loading (with the `document` shim) and result translation. |
 | `src/diagram/svg.ts` | `renderSvg`; also `orderGroups`, which both exporters share. |
 | `src/diagram/drawio.ts` | `renderDrawio` — editable draw.io export, no UI entry point. |
 | `src/diagram/theme.ts` | Metrics and both palettes. Metrics are identical across palettes. |

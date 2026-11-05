@@ -614,6 +614,100 @@ describe("layoutDiagram: directions, groups and flow", () => {
   });
 });
 
+describe("layoutDiagram: panel composition", () => {
+  /**
+   * A canvas of large panels is composed in layers: one run per panel, then one
+   * run that places the panels as fixed boxes. These pin the reasons that split
+   * exists, so a future "simplification" back to a single run fails loudly.
+   */
+  test("a multi-panel canvas is not one wide strip", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    // The reference composition is roughly square. One strip would be far wider
+    // than tall; the composed result must be much closer to square.
+    expect(scene.width / scene.height).toBeLessThan(2);
+  });
+
+  test("packs a card-heavy panel into a grid instead of a column", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    const panel = scene.groups.find((group) => group.id === "cf")!;
+    const cards = scene.nodes.filter((node) => node.parent === "cf");
+    expect(cards.length).toBeGreaterThan(4);
+    // One column would be taller than the panel is wide by a wide margin.
+    expect(panel.height).toBeLessThan(cards.length * 118);
+    // And the grid really has more than one column of distinct x positions.
+    const columns = new Set(cards.map((card) => Math.round(card.x)));
+    expect(columns.size).toBeGreaterThan(1);
+  });
+
+  test("keeps crossing connectors clear of every card they do not connect", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    for (const edge of scene.edges) {
+      for (let index = 1; index < edge.points.length; index += 1) {
+        for (const node of scene.nodes) {
+          if (node.id === edge.source || node.id === edge.target) continue;
+          expect(
+            segmentCrossesRect(edge.points[index - 1], edge.points[index], node),
+            `${edge.id} crosses ${node.id}`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
+  test("keeps every connector endpoint on the border of the node it connects", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    // Horizontal ends are pulled onto the icon card, vertical ends sit on the
+    // footprint border (the card top, or below the caption). Either is correct,
+    // so the check is that the endpoint touches the footprint and, when the end
+    // is horizontal, the card.
+    for (const edge of scene.edges) {
+      for (const node of scene.nodes) {
+        if (node.id !== edge.source && node.id !== edge.target) continue;
+        const endpoint = node.id === edge.source ? edge.points[0] : edge.points[edge.points.length - 1];
+        const next = node.id === edge.source ? edge.points[1] : edge.points[edge.points.length - 2];
+        if (next === undefined) continue;
+        const slack = 3;
+        const onFootprint =
+          Math.abs(endpoint.x - node.x) <= slack ||
+          Math.abs(endpoint.x - (node.x + node.width)) <= slack ||
+          Math.abs(endpoint.y - node.y) <= slack ||
+          Math.abs(endpoint.y - (node.y + node.height)) <= slack;
+        expect(onFootprint, `${edge.id} endpoint on ${node.id} footprint`).toBe(true);
+
+        // An end either meets the footprint border (which is the card top or the
+        // space below the caption) or the visible card. It must touch one of
+        // them: a wire floating beside its card is the defect worth catching.
+        const card = node.card;
+        if (card === undefined) continue;
+        const onCard =
+          Math.abs(endpoint.x - card.x) <= slack ||
+          Math.abs(endpoint.x - (card.x + card.width)) <= slack ||
+          Math.abs(endpoint.y - card.y) <= slack ||
+          Math.abs(endpoint.y - (card.y + card.height)) <= slack;
+        expect(onCard || onFootprint, `${edge.id} end on ${node.id}`).toBe(true);
+      }
+    }
+  });
+
+  test("a single panel keeps its own declared direction", async () => {
+    const scene = await layoutDiagram(
+      spec({
+        direction: "right",
+        groups: [{ id: "column", label: "Column", direction: "down" }],
+        nodes: [
+          { id: "a", label: "Alpha", group: "column" },
+          { id: "b", label: "Beta", group: "column" },
+        ],
+        edges: [{ from: "a", to: "b" }],
+      }),
+      measure,
+    );
+    const [a, b] = ["a", "b"].map((id) => nodeById(scene, id));
+    expect(a.x).toBeCloseTo(b.x, 0);
+    expect(b.y).toBeGreaterThan(a.y);
+  });
+});
+
 describe("layoutDiagram: measurement", () => {
   test("uses the caller's measurement callback to size nodes", async () => {
     const input = spec({ nodes: [{ id: "a", label: "Alpha Beta" }] });

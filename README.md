@@ -24,10 +24,19 @@ and only in development; production startup errors are not retried.
   Drag the divider's centered pill to resize; drag it to the left edge to collapse
   the script, then drag the pill back to reopen. Double-click to restore 50/50.
   The focused divider also supports arrow keys, Home (collapse), and End (expand).
-- No header, toolbars, example picker, status bars, footer, or export menu.
+  Resizing is continuous and preserves diagram pan and zoom; use Fit view to recenter.
+  The split is stored in `localStorage`, so a reload restores it.
+- No header, example picker, status bars, footer, or export menu.
+  A compact bottom-left view toolbar provides zoom out, zoom in, fit view, and a
+  light/dark theme toggle.
+- Dragging glides to a stop and zoom eases to its target; starting another gesture
+  stops the motion immediately. `prefers-reduced-motion` disables both.
 - Layout updates after editing; **Ctrl/Cmd + Enter** runs it again.
 - Drag the whiteboard to pan, scroll to zoom, and double-click to fit.
   The dotted background follows the camera and stays at least 20px apart when zoomed out.
+- The theme applies to the editor, canvas, and diagram instantly: switching palettes
+  repaints the existing scene instead of re-running layout, so the camera never moves.
+  The choice persists in `localStorage`, defaulting to the OS preference.
 - Invalid input shows a plain error below the editor and keeps the last valid diagram.
 
 The script is not autosaved. Copy it from the editor before reloading to keep edits.

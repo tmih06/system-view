@@ -762,6 +762,8 @@ function groupLayoutOptions(
   const minimumWidth = Math.ceil(labelWidth) + GROUP_PAD_SIDE * 2 + GROUP_LABEL_GUTTER;
   const options: Record<string, string> = {
     "elk.padding": paddingExpr(GROUP_PAD_TOP, GROUP_PAD_SIDE, GROUP_PAD_BOTTOM),
+    // Share heading-driven extra width on both sides instead of leaving it all on the right.
+    "elk.contentAlignment": "[H_CENTER,V_TOP]",
     "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
     "elk.nodeSize.minimum": `(${minimumWidth},${GROUP_PAD_TOP + GROUP_PAD_BOTTOM})`,
     "elk.direction": DIRECTION_TO_ELK[direction],

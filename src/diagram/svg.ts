@@ -1,4 +1,4 @@
-import { theme } from "./theme";
+import { theme as lightTheme, type Theme } from "./theme";
 import type { EdgeKind, IconMap, Scene, SceneEdge, SceneGroup, SceneNode } from "./types";
 
 /**
@@ -17,11 +17,13 @@ import type { EdgeKind, IconMap, Scene, SceneEdge, SceneGroup, SceneNode } from 
 
 export interface SvgRenderOptions {
   /**
-   * Graph-paper mode. `true` (default) paints the theme background plus a
+   * Graph-paper mode. `true` (default) paints the palette background plus a
    * 24px grid for standalone exports; `false` leaves the canvas transparent so
    * a host UI can draw its own grid underneath the SVG.
    */
   grid?: boolean;
+  /** Paint palette. Defaults to the light theme; geometry never depends on it. */
+  palette?: Theme;
 }
 
 const GRID_SIZE = 24;
@@ -90,10 +92,10 @@ export function resolveIconDataUri(icons: IconMap, alias: string, subject: strin
 }
 
 /** Edge paint per kind: accent blue for the main flow, muted grey elsewhere. */
-function edgeStyle(kind: EdgeKind): { color: string; width: number; dash?: string } {
-  if (kind === "primary") return { color: theme.primary, width: 1.5 };
-  if (kind === "async") return { color: theme.secondary, width: 1.2, dash: "5 4" };
-  return { color: theme.secondary, width: 1.2 };
+function edgeStyle(kind: EdgeKind, palette: Theme): { color: string; width: number; dash?: string } {
+  if (kind === "primary") return { color: palette.primary, width: 1.5 };
+  if (kind === "async") return { color: palette.secondary, width: 1.2, dash: "5 4" };
+  return { color: palette.secondary, width: 1.2 };
 }
 
 /**
@@ -149,22 +151,22 @@ function rect(x: number, y: number, width: number, height: number, radius: numbe
 }
 
 /** Graph-paper backdrop: opaque theme background plus a 24px grid overlay. */
-function renderGrid(width: number, height: number): { pattern: string; body: string } {
+function renderGrid(width: number, height: number, palette: Theme): { pattern: string; body: string } {
   const patternId = "diagram-grid";
   const pattern =
     `<pattern id="${patternId}" width="${GRID_SIZE}" height="${GRID_SIZE}" patternUnits="userSpaceOnUse">` +
-    `<path d="M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}" fill="none" stroke="${theme.grid}" stroke-width="1"/>` +
+    `<path d="M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}" fill="none" stroke="${palette.grid}" stroke-width="1"/>` +
     `</pattern>`;
   return {
     pattern,
     body:
-      `<rect x="0" y="0" width="${n(width)}" height="${n(height)}" fill="${theme.background}"/>` +
+      `<rect x="0" y="0" width="${n(width)}" height="${n(height)}" fill="${palette.background}"/>` +
       `<rect x="0" y="0" width="${n(width)}" height="${n(height)}" fill="url(#${patternId})"/>`,
   };
 }
 
-function renderGroup(group: SceneGroup): string {
-  const tone = theme.tones[group.tone] ?? theme.tones.neutral;
+function renderGroup(group: SceneGroup, palette: Theme): string {
+  const tone = palette.tones[group.tone] ?? palette.tones.neutral;
   const dash = group.dashed ? ` stroke-dasharray="4 4"` : "";
   const fill = rect(
     group.x,
@@ -176,7 +178,7 @@ function renderGroup(group: SceneGroup): string {
   );
   const label = group.label
     ? `<text x="${n(group.x + GROUP_PAD + 2)}" y="${n(group.y + GROUP_PAD + 10)}" fill="${tone.ink}" ` +
-      `font-family="${escapeXml(theme.fontFamily)}" font-size="${theme.groupSize}" font-weight="bold">` +
+      `font-family="${escapeXml(palette.fontFamily)}" font-size="${palette.groupSize}" font-weight="bold">` +
       `${escapeXml(group.label)}</text>`
     : "";
   return `<g data-group="${escapeXml(group.id)}">${fill}${label}</g>`;
@@ -214,21 +216,22 @@ function captionBlock(
   top: number,
   titleBlock: string[],
   subtitleBlock: string[],
+  palette: Theme,
 ): string {
   const titleLines = splitLines(titleBlock);
   const subtitleLines = splitLines(subtitleBlock);
   const gap = titleLines.length > 0 && subtitleLines.length > 0 ? SUBTITLE_GAP : 0;
-  const subtitleTop = top + titleLines.length * theme.titleLineHeight + gap;
+  const subtitleTop = top + titleLines.length * palette.titleLineHeight + gap;
 
   const title = titleLines
     .map((line, index) =>
       textLine(
         line,
         centerX,
-        lineCenter(top, index, theme.titleLineHeight),
-        theme.titleSize,
-        theme.ink,
-        theme.fontFamily,
+        lineCenter(top, index, palette.titleLineHeight),
+        palette.titleSize,
+        palette.ink,
+        palette.fontFamily,
         "bold",
       ),
     )
@@ -238,10 +241,10 @@ function captionBlock(
       textLine(
         line,
         centerX,
-        lineCenter(subtitleTop, index, theme.subtitleLineHeight),
-        theme.subtitleSize,
-        theme.muted,
-        theme.monoFamily,
+        lineCenter(subtitleTop, index, palette.subtitleLineHeight),
+        palette.subtitleSize,
+        palette.muted,
+        palette.monoFamily,
       ),
     )
     .join("");
@@ -249,15 +252,15 @@ function captionBlock(
 }
 
 /** Height of a node's reserved caption footprint, used to centre body text. */
-function captionHeight(node: SceneNode): number {
+function captionHeight(node: SceneNode, palette: Theme): number {
   const titleLines = splitLines(node.labelLines).length;
   const subtitleLines = splitLines(node.subtitleLines).length;
   const gap = titleLines > 0 && subtitleLines > 0 ? SUBTITLE_GAP : 0;
-  return titleLines * theme.titleLineHeight + gap + subtitleLines * theme.subtitleLineHeight;
+  return titleLines * palette.titleLineHeight + gap + subtitleLines * palette.subtitleLineHeight;
 }
 
 /** Service nodes: white rounded square with the icon, caption underneath. */
-function renderServiceNode(node: SceneNode, icons: IconMap): string {
+function renderServiceNode(node: SceneNode, icons: IconMap, palette: Theme): string {
   if (!node.card) {
     throw new Error(`renderSvg: service node "${node.id}" has no icon card rectangle`);
   }
@@ -268,9 +271,9 @@ function renderServiceNode(node: SceneNode, icons: IconMap): string {
     card.width,
     card.height,
     18,
-    `fill="#ffffff" stroke="${theme.border}" stroke-width="1"`,
+    `fill="${palette.surface}" stroke="${palette.border}" stroke-width="1"`,
   );
-  const iconSize = Math.max(0, Math.min(theme.iconSize, card.width - 8, card.height - 8));
+  const iconSize = Math.max(0, Math.min(palette.iconSize, card.width - 8, card.height - 8));
   const icon = node.icon
     ? (() => {
         // A raw `#` inside a data URI starts a fragment, so a colour literal in
@@ -291,13 +294,14 @@ function renderServiceNode(node: SceneNode, icons: IconMap): string {
     card.y + card.height + CAPTION_GAP,
     node.labelLines,
     node.subtitleLines,
+    palette,
   );
   return `<g data-node="${escapeXml(node.id)}">${cardRect}${icon}${caption}</g>`;
 }
 
 /** Process, decision and terminal bodies painted inside the node footprint. */
-function renderBodyNode(node: SceneNode): string {
-  const body = `fill="#ffffff" stroke="${theme.border}" stroke-width="1"`;
+function renderBodyNode(node: SceneNode, palette: Theme): string {
+  const body = `fill="${palette.surface}" stroke="${palette.border}" stroke-width="1"`;
   let shape: string;
   switch (node.shape) {
     case "decision": {
@@ -320,28 +324,29 @@ function renderBodyNode(node: SceneNode): string {
   const caption = captionBlock(
     node.id,
     node.x + node.width / 2,
-    node.y + (node.height - captionHeight(node)) / 2,
+    node.y + (node.height - captionHeight(node, palette)) / 2,
     node.labelLines,
     node.subtitleLines,
+    palette,
   );
   return `<g data-node="${escapeXml(node.id)}">${shape}${caption}</g>`;
 }
 
-function renderNode(node: SceneNode, icons: IconMap): string {
-  if (node.shape === "service") return renderServiceNode(node, icons);
-  return renderBodyNode(node);
+function renderNode(node: SceneNode, icons: IconMap, palette: Theme): string {
+  if (node.shape === "service") return renderServiceNode(node, icons, palette);
+  return renderBodyNode(node, palette);
 }
 
 /** Arrow markers, one per edge paint so markers inherit the right colour. */
-function renderMarkers(): string {
+function renderMarkers(palette: Theme): string {
   const marker = (id: string, color: string) =>
     `<marker id="${id}" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" ` +
     `orient="auto" markerUnits="userSpaceOnUse">` +
     `<path d="M 0 0 L 10 5 L 0 10 z" fill="${color}"/></marker>`;
   return (
-    marker("arrow-primary", theme.primary) +
-    marker("arrow-secondary", theme.secondary) +
-    marker("arrow-async", theme.secondary)
+    marker("arrow-primary", palette.primary) +
+    marker("arrow-secondary", palette.secondary) +
+    marker("arrow-async", palette.secondary)
   );
 }
 
@@ -351,18 +356,18 @@ function renderMarkers(): string {
  * Multiline label text is split into separate `<text>` baselines because SVG
  * has no automatic line breaking; the block is vertically centred on the box.
  */
-function renderEdgeLabel(edge: SceneEdge): string {
+function renderEdgeLabel(edge: SceneEdge, palette: Theme): string {
   const box = edge.label;
   if (!box || !box.text.trim()) return "";
   const textLines = lines(box.text);
-  const lineHeight = theme.subtitleLineHeight;
-  const style = edgeStyle(edge.kind);
+  const lineHeight = palette.subtitleLineHeight;
+  const style = edgeStyle(edge.kind, palette);
   const content = textLines
     .map((line, index) => {
       const center = box.y + box.height / 2 + (index - (textLines.length - 1) / 2) * lineHeight;
       return (
-        `<text x="${n(box.x + box.width / 2)}" y="${n(baseline(center, theme.edgeSize))}" ` +
-        `fill="${style.color}" font-family="${escapeXml(theme.monoFamily)}" font-size="${theme.edgeSize}" ` +
+        `<text x="${n(box.x + box.width / 2)}" y="${n(baseline(center, palette.edgeSize))}" ` +
+        `fill="${style.color}" font-family="${escapeXml(palette.monoFamily)}" font-size="${palette.edgeSize}" ` +
         `text-anchor="middle">${escapeXml(line)}</text>`
       );
     })
@@ -370,7 +375,7 @@ function renderEdgeLabel(edge: SceneEdge): string {
   return `<g data-label="${escapeXml(edge.id)}">${content}</g>`;
 }
 
-function renderEdge(edge: SceneEdge, nodeIds: Set<string>): string {
+function renderEdge(edge: SceneEdge, nodeIds: Set<string>, palette: Theme): string {
   if (!Array.isArray(edge.points) || edge.points.length < 2) {
     throw new Error(`renderSvg: edge "${edge.id}" has fewer than two points`);
   }
@@ -383,14 +388,14 @@ function renderEdge(edge: SceneEdge, nodeIds: Set<string>): string {
   if (!nodeIds.has(edge.target)) {
     throw new Error(`renderSvg: edge "${edge.id}" references unknown target node "${edge.target}"`);
   }
-  const style = edgeStyle(edge.kind);
+  const style = edgeStyle(edge.kind, palette);
   const marker = `arrow-${edge.kind}`;
   const dash = style.dash ? ` stroke-dasharray="${style.dash}"` : "";
   const d = edge.points.map((point, index) => `${index === 0 ? "M" : "L"} ${n(point.x)} ${n(point.y)}`).join(" ");
   const path =
     `<path d="${d}" fill="none" stroke="${style.color}" stroke-width="${style.width}" ` +
     `stroke-linejoin="round" stroke-linecap="round"${dash} marker-end="url(#${marker})"/>`;
-  return `<g data-edge="${escapeXml(edge.id)}" data-kind="${edge.kind}">${path}${renderEdgeLabel(edge)}</g>`;
+  return `<g data-edge="${escapeXml(edge.id)}" data-kind="${edge.kind}">${path}${renderEdgeLabel(edge, palette)}</g>`;
 }
 
 /**
@@ -408,16 +413,17 @@ export function renderSvg(scene: Scene, icons: IconMap, options: SvgRenderOption
   const width = Number.isFinite(scene.width) ? Math.max(1, scene.width) : 1;
   const height = Number.isFinite(scene.height) ? Math.max(1, scene.height) : 1;
 
-  const markers = renderMarkers();
+  const palette = options.palette ?? lightTheme;
+  const markers = renderMarkers(palette);
   // With `grid: false` neither the pattern nor the backdrop rects are emitted:
   // the canvas must stay transparent so a host page's own graph paper shows
   // through, and an unused pattern def would only add weight.
   const grid = options.grid !== false;
-  const gridLayer = grid ? renderGrid(width, height) : null;
-  const groups = orderGroups(scene.groups).map(renderGroup).join("");
+  const gridLayer = grid ? renderGrid(width, height, palette) : null;
+  const groups = orderGroups(scene.groups).map((group) => renderGroup(group, palette)).join("");
   const nodeIds = new Set(scene.nodes.map((node) => node.id));
-  const edges = scene.edges.map((edge) => renderEdge(edge, nodeIds)).join("");
-  const nodes = scene.nodes.map((node) => renderNode(node, icons)).join("");
+  const edges = scene.edges.map((edge) => renderEdge(edge, nodeIds, palette)).join("");
+  const nodes = scene.nodes.map((node) => renderNode(node, icons, palette)).join("");
 
   return (
     // No `<?xml ?>` declaration: the same string is injected into the preview

@@ -460,6 +460,22 @@ describe("layoutDiagram: connectors", () => {
 });
 
 describe("layoutDiagram: directions, groups and flow", () => {
+  test("centres a service when its group heading requires extra width", async () => {
+    const scene = await layoutDiagram(spec({
+      direction: "right",
+      groups: [{ id: "external", label: "External services and integrations" }],
+      nodes: [
+        { id: "api", label: "API" },
+        { id: "mail", label: "Email", icon: "resend", group: "external" },
+      ],
+      edges: [{ from: "api", to: "mail" }],
+    }), measure);
+    const group = scene.groups.find((group) => group.id === "external")!;
+    const card = nodeById(scene, "mail").card!;
+    expect(group.width).toBeGreaterThan(card.width + 36);
+    expect(card.x + card.width / 2).toBeCloseTo(group.x + group.width / 2, 1);
+  });
+
   test("lays a chain out along the dominant axis for each direction", async () => {
     for (const direction of ["right", "down", "left", "up"] as const) {
       const scene = await layoutDiagram(

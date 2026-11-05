@@ -1,13 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { layoutDiagram } from "../src/diagram/layout";
+import { themes, type ThemeName } from "../src/diagram/theme";
 import { renderSvg } from "../src/diagram/svg";
 import type { IconMap, Scene } from "../src/diagram/types";
 import { ScriptEditor } from "./ScriptEditor";
 import { Whiteboard } from "./Whiteboard";
 import { scriptFor } from "./examples";
 
-interface Rendered { scene: Scene; svg: string }
+/** Layout output, independent of paint: a theme change must not re-run ELK. */
+interface LaidOut { scene: Scene; icons: IconMap }
+const WIDTH_KEY = "diagram-studio:script-panel-width";
+const THEME_KEY = "diagram-studio:theme";
+
+/** Stored palette, else the OS preference; unknown values fall back to light. */
+function readStoredTheme(): ThemeName {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === "dark" || stored === "light") return stored;
+  } catch { /* storage disabled */ }
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+/** Restore the last split; ignore missing, corrupt, or out-of-range values. */
+function readStoredWidth() {
+  try {
+    const stored = Number(localStorage.getItem(WIDTH_KEY));
+    return Number.isFinite(stored) && stored >= 0 && stored <= 85 ? stored : 50;
+  } catch {
+    return 50;
+  }
+}
+
+// Kept off the critical path: feedback tooling must not delay the first diagram paint.
+const Agentation = lazy(() => import("agentation").then((module) => ({ default: module.Agentation })));
 const measuringContext = document.createElement("canvas").getContext("2d")!;
 const iconCache = new Map<string, Promise<string>>();
 
@@ -30,15 +56,30 @@ async function loadIcons(scene: Scene): Promise<IconMap> {
 
 function App() {
   const [source, setSource] = useState(() => scriptFor(0));
-  const [rendered, setRendered] = useState<Rendered | null>(null);
+  const [laidOut, setLaidOut] = useState<LaidOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
-  const [editorWidth, setEditorWidth] = useState(50);
+  const [editorWidth, setEditorWidth] = useState(readStoredWidth);
+  const [themeName, setThemeName] = useState<ThemeName>(readStoredTheme);
   const [resizing, setResizing] = useState(false);
   const workspace = useRef<HTMLElement>(null);
   const dividerDrag = useRef<{ x: number; width: number } | null>(null);
+
+  // Debounce during drag so the width is stored once per settle, not per pointer event.
+  useEffect(() => {
+    if (resizing) return;
+    const timer = setTimeout(() => {
+      try { localStorage.setItem(WIDTH_KEY, String(editorWidth)); } catch { /* storage disabled */ }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [editorWidth, resizing]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeName;
+    try { localStorage.setItem(THEME_KEY, themeName); } catch { /* storage disabled */ }
+  }, [themeName]);
 
   useEffect(() => {
     const ticket = ++generation.current;
@@ -51,9 +92,8 @@ function App() {
           return measuringContext.measureText(text).width;
         });
         const icons = await loadIcons(scene);
-        const svg = renderSvg(scene, icons, { grid: false });
         if (ticket !== generation.current) return;
-        setRendered({ scene, svg });
+        setLaidOut({ scene, icons });
         setError(null);
       } catch (cause) {
         if (ticket === generation.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -64,15 +104,23 @@ function App() {
     return () => { clearTimeout(timer); generation.current++; };
   }, [source, revision]);
 
+  // Repaint only: the palette is not an input to layout, so switching themes is
+  // a synchronous re-render of the same scene with no ELK run, delay, or re-fit.
+  const svg = useMemo(
+    () => laidOut ? renderSvg(laidOut.scene, laidOut.icons, { grid: false, palette: themes[themeName] }) : "",
+    [laidOut, themeName],
+  );
+
   const run = useCallback(() => setRevision((value) => value + 1), []);
 
-  return <main
-    ref={workspace}
-    className={`workspace${resizing ? " is-resizing" : ""}`}
-    style={{ gridTemplateColumns: `${editorWidth}% minmax(0, 1fr)` }}
-  >
+  return <>
+    <main
+      ref={workspace}
+      className={`workspace${resizing ? " is-resizing" : ""}`}
+      style={{ gridTemplateColumns: `${editorWidth}% minmax(0, 1fr)` }}
+    >
     <section id="script-panel" className="editor-pane" aria-label="Script editor panel" inert={editorWidth === 0} style={{ visibility: editorWidth === 0 ? "hidden" : "visible" }}>
-      <ScriptEditor value={source} onChange={setSource} onRun={run} />
+      <ScriptEditor value={source} onChange={setSource} onRun={run} dark={themeName === "dark"} />
       {error && <div className="script-error" role="alert">{error}</div>}
     </section>
     <div
@@ -98,8 +146,7 @@ function App() {
         const width = workspace.current?.getBoundingClientRect().width;
         if (!start || !width) return;
         const next = Math.max(0, Math.min(85, start.width + (event.clientX - start.x) / width * 100));
-        // Snap the unreadable sliver closed; the divider stays reachable at x=0.
-        setEditorWidth(next / 100 * width < 48 ? 0 : next);
+        setEditorWidth(next);
       }}
       onPointerUp={() => { dividerDrag.current = null; setResizing(false); }}
       onPointerCancel={() => { dividerDrag.current = null; setResizing(false); }}
@@ -112,9 +159,16 @@ function App() {
       }}
     />
     <section className="preview-pane" aria-label="Diagram preview panel" aria-busy={busy}>
-      <Whiteboard scene={rendered?.scene ?? null} svg={rendered?.svg ?? ""} />
+      <Whiteboard
+        scene={laidOut?.scene ?? null}
+        svg={svg}
+        dark={themeName === "dark"}
+        onToggleTheme={() => setThemeName((name) => name === "dark" ? "light" : "dark")}
+      />
     </section>
-  </main>;
+    </main>
+    <Suspense fallback={null}><Agentation /></Suspense>
+  </>;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

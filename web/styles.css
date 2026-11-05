@@ -1,9 +1,36 @@
 :root {
   font-family: Arial, sans-serif;
-  color: #30343b;
-  background: #fff;
+  --ink: #30343b;
+  --surface: #fff;
+  --border: #e1e4e8;
+  --divider: #e1e4e8;
+  --divider-active: #aab2bd;
+  --pill: #b7bec8;
+  --pill-active: #8792a1;
+  --dot: #d5d9df;
+  --tool-ink: #626d7b;
+  --tool-hover: #f0f2f5;
+  --error: #a33e34;
+  --error-border: #ead8d5;
+  color: var(--ink);
+  background: var(--surface);
   color-scheme: light;
   -webkit-font-smoothing: antialiased;
+}
+[data-theme="dark"] {
+  --ink: #dbe3ec;
+  --surface: #12161c;
+  --border: #262d36;
+  --divider: #2a323c;
+  --divider-active: #5d6b7a;
+  --pill: #4b5764;
+  --pill-active: #8698a9;
+  --dot: #2b333d;
+  --tool-ink: #a3b0bf;
+  --tool-hover: #1e252e;
+  --error: #e2958c;
+  --error-border: #3a2724;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
@@ -35,7 +62,7 @@ html, body, #root { width: 100%; height: 100%; margin: 0; }
   position: absolute;
   inset: 0 auto 0 4px;
   width: 1px;
-  background: #e1e4e8;
+  background: var(--divider);
 }
 .panel-divider::after {
   content: "";
@@ -46,28 +73,28 @@ html, body, #root { width: 100%; height: 100%; margin: 0; }
   height: 32px;
   transform: translate(-50%, -50%);
   border-radius: 2px;
-  background: #b7bec8;
+  background: var(--pill);
 }
 .panel-divider:hover::after, .panel-divider:focus-visible::after,
-.workspace.is-resizing .panel-divider::after { background: #8792a1; }
-.panel-divider:hover::before, .panel-divider:focus-visible::before { background: #aab2bd; }
+.workspace.is-resizing .panel-divider::after { background: var(--pill-active); }
+.panel-divider:hover::before, .panel-divider:focus-visible::before { background: var(--divider-active); }
 .panel-divider:focus-visible { outline: none; }
 .workspace.is-resizing { cursor: col-resize; user-select: none; }
 .workspace.is-resizing .whiteboard, .workspace.is-resizing .cm-editor { cursor: col-resize; }
 .script-editor { flex: 1; min-height: 0; overflow: hidden; }
 .script-editor .cm-editor { height: 100%; }
-.script-editor .cm-scroller { scrollbar-width: thin; scrollbar-color: #d8dce2 transparent; }
+.script-editor .cm-scroller { scrollbar-width: thin; scrollbar-color: var(--divider) transparent; }
 .script-error {
   flex-shrink: 0;
   max-height: 25%;
   overflow: auto;
   padding: 10px 16px;
-  border-top: 1px solid #ead8d5;
-  color: #a33e34;
+  border-top: 1px solid var(--error-border);
+  color: var(--error);
   font: 12px/1.5 monospace;
   overflow-wrap: anywhere;
 }
-.whiteboard-shell { position: relative; flex: 1; min-height: 0; background: #fff; }
+.whiteboard-shell { position: relative; flex: 1; min-height: 0; background: var(--surface); }
 .whiteboard {
   position: absolute;
   inset: 0;
@@ -75,8 +102,35 @@ html, body, #root { width: 100%; height: 100%; margin: 0; }
   touch-action: none;
   user-select: none;
   cursor: grab;
-  background-image: radial-gradient(circle, #d5d9df 0.75px, transparent 0.75px);
+  background-image: radial-gradient(circle, var(--dot) 0.75px, transparent 0.75px);
 }
 .whiteboard.is-dragging { cursor: grabbing; }
 .diagram-content { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
 .diagram-content > svg { display: block; overflow: visible; }
+.view-tools {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.view-tools button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--tool-ink);
+  cursor: pointer;
+}
+.view-tools button:hover { background: var(--tool-hover); }
+.view-tools button:focus-visible { outline: 2px solid var(--pill-active); outline-offset: -2px; }
+.view-tools button:disabled { opacity: .35; cursor: default; }
+.view-tools svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }

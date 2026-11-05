@@ -122,3 +122,101 @@ describe("layoutDiagram: manual layout", () => {
     }), measure)).rejects.toThrow(/x and y must be given together/);
   });
 });
+
+describe("traced fixture integrity", () => {
+  /**
+   * The traced example must stay reproducible from `diagram/club.drawio`.
+   * Hand-editing the JSON is what previously dropped sizes, anchors, and label
+   * origins; this check makes drift a test failure instead of a visual defect.
+   */
+  test("club.manual.json is exactly what scripts/trace-club.ts generates", async () => {
+    const committed = await Bun.file(new URL("../diagram/club.manual.json", import.meta.url)).text();
+    // Generate to a temp path: verification must never rewrite the fixture.
+    const scratch = new URL(`../.build/club-${crypto.randomUUID()}.json`, import.meta.url).pathname;
+    const generated = Bun.spawn(["bun", "scripts/trace-club.ts", scratch], {
+      cwd: new URL("../", import.meta.url).pathname,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([generated.exited, new Response(generated.stderr).text()]);
+    const fresh = await Bun.file(scratch).text();
+    await Bun.file(scratch).delete();
+    expect(stderr).toBe("");
+    expect(code).toBe(0);
+    expect(fresh).toBe(committed);
+  }, 30000);
+
+  test("every traced node has an icon or an explicit body shape", async () => {
+    const input = club as DiagramSpec;
+    for (const node of input.nodes) {
+      expect(Boolean(node.icon) || Boolean(node.shape), node.id).toBe(true);
+    }
+  });
+
+  test("every traced node carries its authored box size", async () => {
+    const input = club as DiagramSpec;
+    for (const node of input.nodes) {
+      expect(node.width ?? 0, `${node.id} width`).toBeGreaterThan(0);
+      expect(node.height ?? 0, `${node.id} height`).toBeGreaterThan(0);
+    }
+  });
+
+  test("every labelled connector carries an authored label anchor", async () => {
+    const input = club as DiagramSpec;
+    for (const edge of input.edges) {
+      if (edge.label === undefined) continue;
+      expect(edge.labelAt, edge.id).toBeDefined();
+      expect(edge.fromAnchor, edge.id).toBeDefined();
+      expect(edge.toAnchor, edge.id).toBeDefined();
+    }
+  });
+});
+
+describe("manual layout guards", () => {
+  const base = (extra: Record<string, unknown> = {}) => ({
+    layout: "manual",
+    nodes: [
+      { id: "a", label: "Alpha", x: 0, y: 0, width: 94, height: 104 },
+      { id: "b", label: "Beta", x: 400, y: 0, width: 94, height: 104 },
+    ],
+    edges: [{ from: "a", to: "b" }],
+    ...extra,
+  });
+
+  test("rejects overlapping cards instead of drawing them on top of each other", async () => {
+    await expect(layoutDiagram(spec(base({
+      nodes: [
+        { id: "a", label: "Alpha", x: 0, y: 0, width: 94, height: 104 },
+        { id: "b", label: "Beta", x: 40, y: 40, width: 94, height: 104 },
+      ],
+    })), measure)).rejects.toThrow(/nodes "a" and "b" overlap/);
+  });
+
+  test("rejects a label placed on top of a card", async () => {
+    await expect(layoutDiagram(spec(base({
+      edges: [{ from: "a", to: "b", label: "X", labelAt: { x: 47, y: 20 } }],
+    })), measure)).rejects.toThrow(/label of connector .* overlaps node/);
+  });
+
+  test("rejects a node that names an unknown group", async () => {
+    await expect(layoutDiagram(spec(base({
+      nodes: [{ id: "a", label: "Alpha", x: 0, y: 0, group: "ghost" }],
+    })), measure)).rejects.toThrow(/unknown group "ghost"/);
+  });
+
+  test("removes a reverse bend instead of drawing a U-turn", async () => {
+    const scene = await layoutDiagram(spec(base({
+      edges: [{ from: "a", to: "b", via: [{ x: 200, y: 0 }, { x: 100, y: 0 }, { x: 300, y: 0 }] }],
+    })), measure);
+    const points = scene.edges[0].points;
+    for (let index = 2; index < points.length; index += 1) {
+      const first = { x: points[index - 1].x - points[index - 2].x, y: points[index - 1].y - points[index - 2].y };
+      const second = { x: points[index].x - points[index - 1].x, y: points[index].y - points[index - 1].y };
+      const lengths = Math.hypot(first.x, first.y) * Math.hypot(second.x, second.y);
+      if (lengths < 1) continue;
+      // An orthogonal turn is exactly 90 degrees (dot 0); anything below -0.9
+      // would be doubling back along the same axis.
+      expect((first.x * second.x + first.y * second.y) / lengths).toBeGreaterThan(-0.9);
+    }
+  });
+});

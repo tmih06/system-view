@@ -27,9 +27,14 @@ export interface NodeSpec {
   /** Top-left corner in canvas space. Present on every node switches to manual layout. */
   x?: number;
   y?: number;
-  /** Minimum box size; captions may still make the node larger. */
+  /** Authored box size. Authoritative in manual layout, a minimum in auto. */
   width?: number;
   height?: number;
+  /** Authored icon card offset from the node origin; manual layout only. */
+  cardX?: number;
+  cardY?: number;
+  cardWidth?: number;
+  cardHeight?: number;
 }
 export interface EdgeSpec {
   id?: string;

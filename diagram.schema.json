@@ -166,11 +166,30 @@
         "width": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "Minimum box width; captions may make it larger."
+          "description": "Authored box size; authoritative in manual layout, a minimum in auto."
         },
         "height": {
           "type": "number",
-          "exclusiveMinimum": 0
+          "exclusiveMinimum": 0,
+          "description": "Authored box height; authoritative in manual layout, a minimum in auto."
+        },
+        "cardX": {
+          "type": "number",
+          "description": "Icon card offset from the node origin; manual layout only."
+        },
+        "cardY": {
+          "type": "number",
+          "description": "Icon card offset from the node origin; manual layout only."
+        },
+        "cardWidth": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Icon card width; manual layout only."
+        },
+        "cardHeight": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Icon card height; manual layout only."
         }
       }
     },

@@ -119,10 +119,24 @@ double back. Authored polylines are drawn verbatim when they are already
 axis-aligned; a route with a diagonal segment is rewritten as a 90-degree
 staircase, and midpoints that would reverse the direction are collapsed.
 
-`diagram/club.json` is the same topology in auto mode, and
-`diagram/club.manual.json` is the traced composition built from
-`diagram/club.drawio`. `src/diagram/`
-contains the layout module, shared theme tokens, and pure SVG/draw.io exporters.
+`diagram/club.json` is the same topology in auto mode. `diagram/club.manual.json`
+is generated, never hand-edited:
+
+```sh
+bun run trace      # diagram/club.drawio -> diagram/club.manual.json
+```
+
+The generator reads the traced rectangles, connector anchors, bend points, and
+label origins from the drawio file, matches every icon to a committed
+`icons/*.svg` alias (writing unmatched artwork out rather than leaving a card
+iconless), and emits stable key order. `bun test` fails if the committed JSON
+differs from freshly generated output, so the fixture cannot drift.
+
+Manual geometry is also validated at layout time: overlapping cards, a label on
+top of a card, or two labels on top of each other raise an error instead of
+being drawn, so an SVG or draw.io export can never contain them.
+
+`src/diagram/` contains the layout module, shared theme tokens, and pure SVG/draw.io exporters.
 The website uses the layout and SVG renderer in the browser. The draw.io exporter
 remains available as `renderDrawio(scene, icons)` in `src/diagram/drawio.ts`, without
 adding controls to the workspace.

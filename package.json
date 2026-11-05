@@ -8,6 +8,7 @@
     "dev": "bun --hot src/server.ts",
     "preview": "wrangler pages dev dist",
     "build": "bun scripts/build.ts",
+    "trace": "bun scripts/trace-club.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },

@@ -105,7 +105,7 @@ const KINDS = ["primary", "secondary", "async"] as const satisfies readonly Edge
 
 const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow", "layout"];
 const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction", "x", "y", "width", "height"];
-const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape", "x", "y", "width", "height"];
+const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape", "x", "y", "width", "height", "cardX", "cardY", "cardWidth", "cardHeight"];
 const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide", "via", "fromAnchor", "toAnchor", "labelOffset", "labelAt"];
 
 const DIRECTION_TO_ELK: Record<Direction, string> = {
@@ -149,10 +149,12 @@ interface ValidatedNode {
   shape: Shape;
   /** Declaration index; used only as a deterministic reading-order hint. */
   order: number;
-  /** Explicit top-left corner and minimum size in manual mode. */
+  /** Explicit top-left corner and size in manual mode. */
   at?: Point;
   minWidth?: number;
   minHeight?: number;
+  /** Explicit icon-card rectangle relative to the node origin, manual mode only. */
+  card?: Rect;
 }
 
 interface ValidatedEdge {
@@ -379,6 +381,19 @@ function validateDiagram(input: unknown): ValidatedDiagram {
     };
     if (at !== undefined) node.at = at;
     if (size !== undefined) { node.minWidth = size.width; node.minHeight = size.height; }
+    const fields = ["cardWidth", "cardHeight"] as const;
+    const card = fields.map((field) => value[field]).filter((entry) => entry !== undefined);
+    if (card.length > 0) {
+      if (card.length !== fields.length) fail(path, "cardWidth and cardHeight must be given together");
+      node.card = {
+        x: readNumber(value.cardX ?? 0, `${path}.cardX`),
+        y: readNumber(value.cardY ?? 0, `${path}.cardY`),
+        width: readNumber(value.cardWidth, `${path}.cardWidth`),
+        height: readNumber(value.cardHeight, `${path}.cardHeight`),
+      };
+    } else if (value.cardX !== undefined || value.cardY !== undefined) {
+      fail(path, "cardX and cardY require cardWidth and cardHeight");
+    }
     nodes.push(node);
     nodeById.set(id, node);
   });
@@ -1126,13 +1141,19 @@ function manualMetrics(node: ValidatedNode, measure: MeasureText): NodeMetrics {
   const metrics = measureNode(node, measure);
   const width = node.minWidth ?? metrics.width;
   const height = node.minHeight ?? metrics.height;
-  if (width === metrics.width && height === metrics.height) return metrics;
+  // An authored card rectangle is exact: the traced icon is smaller than the
+  // default card and sits off-centre, which is what its connector anchors and
+  // label positions were measured against.
+  const card = node.card ?? (metrics.card === null
+    ? null
+    : { ...metrics.card, x: (width - metrics.card.width) / 2 });
+  if (width === metrics.width && height === metrics.height && card === metrics.card) return metrics;
   return {
     ...metrics,
     width,
     height,
-    card: metrics.card === null ? null : { ...metrics.card, x: (width - metrics.card.width) / 2 },
-    sideY: metrics.card === null ? height / 2 : metrics.card.height / 2,
+    card,
+    sideY: card === null ? height / 2 : card.height / 2,
   };
 }
 
@@ -1386,6 +1407,8 @@ function layoutManual(
     if (edge.label !== undefined) extend(edge.label.x + edge.label.width, edge.label.y + edge.label.height);
   }
 
+  assertManualGeometry(sceneGroups, sceneNodes, sceneEdges);
+
   return {
     title: diagram.title,
     width: round(maxX + ROOT_PAD),
@@ -1394,6 +1417,57 @@ function layoutManual(
     nodes: sceneNodes,
     edges: sceneEdges,
   };
+}
+
+/** True when two rectangles share any interior area. */
+function rectsOverlap(a: Rect, b: Rect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+/**
+ * Reject manual geometry that cannot have come from a traced reference.
+ *
+ * These are the exact defects this mode was added to fix, so they fail loudly
+ * instead of reaching the canvas: a label sitting on a card, two labels on top
+ * of each other, or two cards overlapping. Checking here rather than in the
+ * renderer means an SVG or draw.io export can never contain them either.
+ *
+ * Doubling-back routes are not re-checked because they are already prevented:
+ * every route passes through {@link collapseReversals} before reaching here.
+ */
+function assertManualGeometry(groups: SceneGroup[], nodes: SceneNode[], edges: SceneEdge[]): void {
+  const labels = edges.flatMap((edge) => (edge.label === undefined ? [] : [{ id: edge.id, box: edge.label }]));
+  for (const node of nodes) {
+    // The icon card is the visible box; the caption is part of the footprint.
+    const visible = node.card ?? node;
+    for (const label of labels) {
+      if (rectsOverlap(label.box, visible)) {
+        throw new Error(`Manual layout: label of connector "${label.id}" overlaps node "${node.id}"; move its labelAt or bend points`);
+      }
+    }
+  }
+  for (let index = 0; index < labels.length; index += 1) {
+    for (let other = index + 1; other < labels.length; other += 1) {
+      if (rectsOverlap(labels[index].box, labels[other].box)) {
+        throw new Error(`Manual layout: labels of "${labels[index].id}" and "${labels[other].id}" overlap; adjust their labelAt`);
+      }
+    }
+  }
+  for (let index = 0; index < nodes.length; index += 1) {
+    for (let other = index + 1; other < nodes.length; other += 1) {
+      const a = nodes[index].card ?? nodes[index];
+      const b = nodes[other].card ?? nodes[other];
+      if (rectsOverlap(a, b)) {
+        throw new Error(`Manual layout: nodes "${nodes[index].id}" and "${nodes[other].id}" overlap; check their x/y`);
+      }
+    }
+  }
+  const groupIds = new Set(groups.map((group) => group.id));
+  for (const node of nodes) {
+    if (node.parent !== undefined && !groupIds.has(node.parent)) {
+      throw new Error(`Manual layout: node "${node.id}" names unknown group "${node.parent}"`);
+    }
+  }
 }
 
 /**

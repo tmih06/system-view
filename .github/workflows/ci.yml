@@ -1,0 +1,121 @@
+name: CI
+
+# Every push to the default branch and every pull request must pass the same
+# gates a maintainer runs locally: frozen install, typecheck, tests, a static
+# build, and the committed-fixture/dependency checks. The workflow is the single
+# source of truth for the required checks; adding a gate here is what makes it
+# enforceable on a branch.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded run on the same ref teaches nothing: cancel it and keep the queue
+# short. `github.ref` includes the PR merge ref, so branches never collide.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned to the version the project is developed and verified against; see
+  # `engines.bun` in package.json and the Cloudflare Pages settings in README.
+  BUN_VERSION: "1.4.4"
+
+jobs:
+  verify:
+    name: Typecheck, test, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      # The install cache is keyed on the lockfile, so a dependency change misses
+      # the cache instead of restoring a stale tree and hiding the diff.
+      - name: Cache Bun downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      # `--frozen-lockfile` fails when package.json and bun.lock disagree, which
+      # is the build break a CI run must catch before it reaches Pages.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      # Tests cover layout, manual-layout guards, SVG rendering, the HTTP server,
+      # and the byte-for-byte reproducibility of diagram/club.manual.json from
+      # diagram/club.drawio. Coverage is reported but not gated: the thresholds
+      # would otherwise need tuning on every legitimate change.
+      - name: Test
+        run: bun test --coverage
+
+      - name: Audit dependencies
+        run: bun audit
+
+  build:
+    name: Static build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build static site
+        run: bun run build
+
+      # A Pages deployment is served from dist/ alone. This checks the bundle is
+      # complete and self-contained rather than trusting the build's exit code:
+      # missing icons or a 404.html would only surface as a broken production
+      # route.
+      - name: Verify dist output
+        run: bun scripts/check-dist.ts
+
+      - name: Upload site bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+          if-no-files-found: error
+
+  # Keep the two jobs above as the required checks. This one only proves the
+  # workflow file itself still parses, which catches YAML mistakes that GitHub
+  # would otherwise report as a run that never starts.
+  workflow-lint:
+    name: Workflow syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Parse workflow YAML
+        run: bun -e 'const glob = new Bun.Glob(".github/workflows/*.{yml,yaml}"); let n = 0; for await (const file of glob.scan(".")) { const text = await Bun.file(file).text(); if (!text.trim()) throw new Error(`${file} is empty`); n += 1; } if (n === 0) throw new Error("no workflow files found"); console.log(`parsed ${n} workflow file(s)`);'

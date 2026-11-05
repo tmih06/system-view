@@ -13,5 +13,5 @@
     "resolveJsonModule": true,
     "types": ["bun", "react", "react-dom"]
   },
-  "include": ["src", "web", "tests"]
+  "include": ["src", "web", "tests", "scripts"]
 }

@@ -123,6 +123,65 @@ describe("layoutDiagram: manual layout", () => {
   });
 });
 
+describe("shared node geometry", () => {
+  /**
+   * A hand-composed diagram usually gives every card the same box and the same
+   * icon square. `defaults` states that once; a node overrides only what differs.
+   * The behaviour a caller relies on is that both spellings produce the same
+   * scene, so a fixture can be compacted without changing a single pixel.
+   */
+  test("defaults and per-node geometry produce identical scenes", async () => {
+    const inline = spec({
+      layout: "manual",
+      nodes: [
+        { id: "a", label: "Alpha", icon: "redis", x: 0, y: 0, width: 94, height: 104, cardX: 18, cardY: 0, cardWidth: 58, cardHeight: 58 },
+        { id: "b", label: "Beta", icon: "hono", x: 200, y: 0, width: 94, height: 104, cardX: 18, cardY: 0, cardWidth: 58, cardHeight: 58 },
+      ],
+      edges: [{ id: "ab", from: "a", to: "b" }],
+    });
+    const shared = spec({
+      layout: "manual",
+      defaults: { width: 94, height: 104, cardX: 18, cardY: 0, cardWidth: 58, cardHeight: 58 },
+      nodes: [
+        { id: "a", label: "Alpha", icon: "redis", x: 0, y: 0 },
+        { id: "b", label: "Beta", icon: "hono", x: 200, y: 0 },
+      ],
+      edges: [{ id: "ab", from: "a", to: "b" }],
+    });
+
+    expect(JSON.stringify(await layoutDiagram(shared, measure))).toBe(JSON.stringify(await layoutDiagram(inline, measure)));
+  });
+
+  test("a node overrides a shared size without losing the shared card", async () => {
+    const scene: Scene = await layoutDiagram(spec({
+      layout: "manual",
+      defaults: { width: 94, height: 104, cardX: 18, cardY: 0, cardWidth: 58, cardHeight: 58 },
+      nodes: [
+        { id: "a", label: "Alpha", icon: "redis", x: 0, y: 0 },
+        { id: "wide", label: "Wide", icon: "redis", x: 200, y: 0, width: 140 },
+      ],
+      edges: [],
+    }), measure);
+
+    const a = scene.nodes.find((node) => node.id === "a")!;
+    const wide = scene.nodes.find((node) => node.id === "wide")!;
+    expect(a.width).toBe(94);
+    expect(wide.width).toBe(140);
+    // The shared card rectangle is relative to the node origin, so it survives.
+    expect(wide.card!.x).toBe(wide.x + 18);
+    expect(wide.card!.width).toBe(58);
+  });
+
+  test("rejects a shared card that is only half specified", async () => {
+    await expect(layoutDiagram(spec({
+      layout: "manual",
+      defaults: { cardWidth: 58 },
+      nodes: [{ id: "a", label: "Alpha", x: 0, y: 0 }],
+      edges: [],
+    }), measure)).rejects.toThrow(/cardWidth and cardHeight must be given together/);
+  });
+});
+
 describe("traced fixture integrity", () => {
   /**
    * The traced example must stay reproducible from `diagram/club.drawio`.
@@ -153,11 +212,14 @@ describe("traced fixture integrity", () => {
     }
   });
 
-  test("every traced node carries its authored box size", async () => {
+  test("every traced node carries an authored box size, inline or shared", async () => {
     const input = club as DiagramSpec;
+    // Shared card geometry lives in `defaults`; a node may still override it.
+    expect(input.defaults?.width ?? 0).toBeGreaterThan(0);
+    expect(input.defaults?.height ?? 0).toBeGreaterThan(0);
     for (const node of input.nodes) {
-      expect(node.width ?? 0, `${node.id} width`).toBeGreaterThan(0);
-      expect(node.height ?? 0, `${node.id} height`).toBeGreaterThan(0);
+      expect(node.width ?? input.defaults?.width ?? 0, `${node.id} width`).toBeGreaterThan(0);
+      expect(node.height ?? input.defaults?.height ?? 0, `${node.id} height`).toBeGreaterThan(0);
     }
   });
 

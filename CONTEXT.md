@@ -28,6 +28,7 @@ tests/              behavioural tests over the engine
 | **group** | A tinted panel. Groups nest, so a group can contain groups and nodes. |
 | **edge** | A directed connector. Labels are optional. |
 | **footprint** | A node's full box *including* its caption. This is the obstacle the router avoids. |
+| **defaults** | Per-document box and card geometry shared by every node; a node may override any field. |
 | **card** | The visible icon square inside a service footprint. |
 | **flow** | An optional preferred chain of nodes; a routing preference, never a new connection. |
 | **auto / manual** | Automatic layout, or explicit authored coordinates. |
@@ -62,6 +63,10 @@ geometry, which is why a theme switch can recolour without re-running layout.
 - **`manual` geometry is authoritative, not a minimum.** Authored `width`/`height`
   and `cardX`/`cardY` are exact, because anchors are fractions of the authored
   box. Re-measuring would move every endpoint off its traced point.
+- **Shared geometry lives in `defaults`.** When every node has the same box and
+  icon square, declaring it once keeps the script about geometry that differs. A
+  node override wins, and the card rectangle stays relative to the node origin so
+  a width override does not move the icon.
 - **Manual output is self-checking.** `assertManualGeometry` throws on
   overlapping cards, a label over a card, or two labels over each other, so no
   export can contain them.

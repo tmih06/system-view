@@ -352,7 +352,46 @@ for (const [id, cell] of cells) {
   edges.push(edge);
 }
 
-const document_out = { title: "Club architecture", layout: "manual", groups, nodes, edges };
+// ---
+// Emit in the compact authored form
+// ---
+
+/**
+ * Fields every traced node happens to share, hoisted into `defaults`.
+ *
+ * The reference gives all 35 cards the same box and the same icon square, so
+ * writing them per node is 210 numbers that must stay in sync and drown the
+ * geometry that actually differs. Only a field with a single value across every
+ * node is hoisted; a genuine outlier keeps its own value.
+ */
+const SHARED_NODE_FIELDS = ["width", "height", "cardX", "cardY", "cardWidth", "cardHeight"] as const;
+
+const defaults: Record<string, number> = {};
+for (const field of SHARED_NODE_FIELDS) {
+  const values = new Set(nodes.map((node) => node[field]));
+  const [only] = values;
+  if (values.size === 1 && only !== undefined) defaults[field] = only;
+}
+
+const compactNodes = nodes.map((node) => {
+  const { width, height, cardX, cardY, cardWidth, cardHeight, ...rest } = node;
+  // Keep per-node geometry only where it differs from the hoisted default.
+  const keep: typeof rest & Partial<Record<(typeof SHARED_NODE_FIELDS)[number], number>> = { ...rest };
+  for (const field of SHARED_NODE_FIELDS) {
+    const value = { width, height, cardX, cardY, cardWidth, cardHeight }[field];
+    if (value !== undefined && value !== defaults[field]) keep[field] = value;
+  }
+  return keep;
+});
+
+const document_out = {
+  title: "Club architecture",
+  layout: "manual",
+  ...(Object.keys(defaults).length > 0 ? { defaults } : {}),
+  groups,
+  nodes: compactNodes,
+  edges,
+};
 await Bun.write(outputPath, JSON.stringify(document_out, null, 2) + "\n");
 console.log(
   `trace-club: wrote ${groups.length} groups, ${nodes.length} nodes ` +

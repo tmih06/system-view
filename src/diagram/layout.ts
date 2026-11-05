@@ -103,10 +103,21 @@ const TONES = ["warm", "cool", "neutral"] as const satisfies readonly Tone[];
 const SHAPES = ["service", "process", "decision", "terminal"] as const satisfies readonly Shape[];
 const KINDS = ["primary", "secondary", "async"] as const satisfies readonly EdgeKind[];
 
-const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow", "layout"];
+const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow", "layout", "defaults"];
+const DEFAULTS_FIELDS = ["width", "height", "cardX", "cardY", "cardWidth", "cardHeight"];
 const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction", "x", "y", "width", "height"];
 const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape", "x", "y", "width", "height", "cardX", "cardY", "cardWidth", "cardHeight"];
 const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide", "via", "fromAnchor", "toAnchor", "labelOffset", "labelAt"];
+/**
+ * Attachment points that follow the icon card instead of the box.
+ *
+ * A hand-composed diagram attaches most wires at the icon card's left or right
+ * edge, at the card's vertical centre. Writing that as a fraction of the whole
+ * box (0.851064, 0.278846) hides the intent and breaks as soon as the card or
+ * box changes size. The name states the relationship instead.
+ */
+const ANCHOR_NAMES = ["card-left", "card-right", "card-top", "card-bottom", "card-centre"] as const;
+type AnchorName = (typeof ANCHOR_NAMES)[number];
 
 const DIRECTION_TO_ELK: Record<Direction, string> = {
   right: "RIGHT",
@@ -168,8 +179,13 @@ interface ValidatedEdge {
   toSide?: Side;
   /** Explicit interior bends in manual mode. */
   via?: Point[];
-  fromAnchor?: Point;
-  toAnchor?: Point;
+  /**
+   * Attachment on the source box: a fraction pair, or a named position derived
+   * from that node's icon card (see {@link namedAnchor}).
+   */
+  fromAnchor?: Point | AnchorName;
+  /** Attachment on the target box, with the same forms as `fromAnchor`. */
+  toAnchor?: Point | AnchorName;
   labelOffset?: Point;
   labelAt?: Point;
 }
@@ -346,6 +362,38 @@ function validateDiagram(input: unknown): ValidatedDiagram {
   }
   assertAcyclicGroups(groups, groupById);
 
+  /**
+   * Values shared by every node.
+   *
+   * A hand-composed diagram usually gives every card the same box and the same
+   * icon square — 35 nodes with one identical `width`/`height` is 70 redundant
+   * numbers that must stay in sync. Declaring them once here keeps the script
+   * about geometry that actually differs, and a node may still override any
+   * field individually.
+   */
+  const defaults: { width?: number; height?: number; card?: Rect } = {};
+  if (root.defaults !== undefined) {
+    const path = "defaults";
+    const value = readObject(root.defaults, path);
+    rejectUnknownFields(value, DEFAULTS_FIELDS, path);
+    const size = readOptionalSize(value, path);
+    if (size?.width !== undefined) defaults.width = size.width;
+    if (size?.height !== undefined) defaults.height = size.height;
+    const cardFields = ["cardWidth", "cardHeight"] as const;
+    const card = cardFields.filter((field) => value[field] !== undefined);
+    if (card.length > 0) {
+      if (card.length !== cardFields.length) fail(path, "cardWidth and cardHeight must be given together");
+      defaults.card = {
+        x: readNumber(value.cardX ?? 0, `${path}.cardX`),
+        y: readNumber(value.cardY ?? 0, `${path}.cardY`),
+        width: readNumber(value.cardWidth, `${path}.cardWidth`),
+        height: readNumber(value.cardHeight, `${path}.cardHeight`),
+      };
+    } else if (value.cardX !== undefined || value.cardY !== undefined) {
+      fail(path, "cardX and cardY require cardWidth and cardHeight");
+    }
+  }
+
   const nodes: ValidatedNode[] = [];
   const nodeById = new Map<string, ValidatedNode>();
   rawNodes.forEach((entry, index) => {
@@ -380,7 +428,10 @@ function validateDiagram(input: unknown): ValidatedDiagram {
           : readEnum(value.shape, `${path}.shape`, SHAPES),
     };
     if (at !== undefined) node.at = at;
-    if (size !== undefined) { node.minWidth = size.width; node.minHeight = size.height; }
+    const width = size?.width ?? defaults.width;
+    const height = size?.height ?? defaults.height;
+    if (width !== undefined) node.minWidth = width;
+    if (height !== undefined) node.minHeight = height;
     const fields = ["cardWidth", "cardHeight"] as const;
     const card = fields.map((field) => value[field]).filter((entry) => entry !== undefined);
     if (card.length > 0) {
@@ -393,6 +444,11 @@ function validateDiagram(input: unknown): ValidatedDiagram {
       };
     } else if (value.cardX !== undefined || value.cardY !== undefined) {
       fail(path, "cardX and cardY require cardWidth and cardHeight");
+    } else if (defaults.card !== undefined) {
+      // A shared card rectangle keeps every icon square identical, which is what
+      // makes a traced grid of cards line up. It is relative to the node origin,
+      // so a node that overrides only `width` keeps the same card inset.
+      node.card = { ...defaults.card };
     }
     nodes.push(node);
     nodeById.set(id, node);
@@ -427,6 +483,12 @@ function validateDiagram(input: unknown): ValidatedDiagram {
     for (const key of ["fromAnchor", "toAnchor"] as const) {
       if (value[key] === undefined) continue;
       const anchorPath = `${path}.${key}`;
+      if (typeof value[key] === "string") {
+        // A named anchor is resolved against the node's measured icon card later,
+        // so the script never repeats a fraction that depends on card geometry.
+        edge[key] = readEnum(value[key], anchorPath, ANCHOR_NAMES);
+        continue;
+      }
       const fraction = readObject(value[key], anchorPath);
       rejectUnknownFields(fraction, ["x", "y"], anchorPath);
       const point = {
@@ -1158,6 +1220,61 @@ function manualMetrics(node: ValidatedNode, measure: MeasureText): NodeMetrics {
 }
 
 /**
+ * Absolute attachment point for an authored anchor.
+ *
+ * A fraction pair is taken literally, as a fraction of the box. A name is
+ * resolved against the node's icon card, because that is what a hand-composed
+ * reference actually attaches wires to: the card's left or right edge, at the
+ * card's vertical centre. Both therefore survive a change of card size or box
+ * size, which the equivalent literal fraction would not.
+ *
+ * @param rect Absolute box of the node.
+ * @param metrics That node's measured metrics, including its card.
+ * @param anchor Authored anchor: a fraction pair or a card-relative name.
+ * @returns Absolute attachment point.
+ */
+function resolveAnchor(rect: Rect, metrics: NodeMetrics, anchor: Point | AnchorName): Point {
+  if (typeof anchor !== "string") {
+    return { x: round(rect.x + rect.width * anchor.x), y: round(rect.y + rect.height * anchor.y) };
+  }
+  // Without a card there is nothing to follow; the box edge is the honest answer.
+  if (metrics.card === null) {
+    const centre = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    switch (anchor) {
+      case "card-left":
+        return { x: round(rect.x), y: round(centre.y) };
+      case "card-right":
+        return { x: round(rect.x + rect.width), y: round(centre.y) };
+      case "card-top":
+        return { x: round(centre.x), y: round(rect.y) };
+      case "card-bottom":
+        return { x: round(centre.x), y: round(rect.y + rect.height) };
+      case "card-centre":
+        return { x: round(centre.x), y: round(centre.y) };
+    }
+  }
+  const card = {
+    left: rect.x + metrics.card.x,
+    right: rect.x + metrics.card.x + metrics.card.width,
+    top: rect.y + metrics.card.y,
+    bottom: rect.y + metrics.card.y + metrics.card.height,
+    middle: rect.y + metrics.card.y + metrics.card.height / 2,
+  };
+  switch (anchor) {
+    case "card-left":
+      return { x: round(card.left), y: round(card.middle) };
+    case "card-right":
+      return { x: round(card.right), y: round(card.middle) };
+    case "card-top":
+      return { x: round(card.left + (card.right - card.left) / 2), y: round(card.top) };
+    case "card-bottom":
+      return { x: round(card.left + (card.right - card.left) / 2), y: round(card.bottom) };
+    case "card-centre":
+      return { x: round(card.left + (card.right - card.left) / 2), y: round(card.middle) };
+  }
+}
+
+/**
  * Where the segment from a node's centre to `toward` crosses its border.
  *
  * Hand-composed references attach connectors at arbitrary points, so anchors are
@@ -1372,18 +1489,14 @@ function layoutManual(
     }
 
     const centre = (rect: Rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
-    const at = (rect: Rect, fraction: Point) => ({
-      x: round(rect.x + rect.width * fraction.x),
-      y: round(rect.y + rect.height * fraction.y),
-    });
     const interior = edge.via ?? [];
     // An authored anchor is exact; otherwise the border crossing toward the
     // next waypoint keeps hand-written connectors sensible without anchors.
     const start = edge.fromAnchor
-      ? at(from, edge.fromAnchor)
+      ? resolveAnchor(from, metricsById.get(edge.from)!, edge.fromAnchor)
       : borderPoint(from, interior[0] ?? centre(to));
     const end = edge.toAnchor
-      ? at(to, edge.toAnchor)
+      ? resolveAnchor(to, metricsById.get(edge.to)!, edge.toAnchor)
       : borderPoint(to, interior[interior.length - 1] ?? centre(from));
     // Traced polylines are already orthogonal; drawing them verbatim preserves
     // the authored corners. Only a script with a genuinely diagonal segment is

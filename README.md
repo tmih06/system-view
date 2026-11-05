@@ -84,6 +84,20 @@ drawing, for example. Every node then needs `x`/`y`, groups need `x`/`y`/`width`
 attachment points, and `labelAt` label anchors. Manual mode refuses to draw
 overlapping cards, a label on top of a card, or two labels on top of each other.
 
+When every card is the same size — the usual case — state that once in
+`defaults` instead of on all 35 nodes. A node still overrides any field:
+
+```json
+{
+  "layout": "manual",
+  "defaults": { "width": 94, "height": 104, "cardWidth": 58, "cardHeight": 58, "cardX": 18, "cardY": 0 },
+  "nodes": [
+    { "id": "api", "label": "API", "icon": "hono", "x": 864, "y": 511 },
+    { "id": "db", "label": "PostgreSQL", "icon": "postgresql", "x": 1139, "y": 511, "width": 120 }
+  ]
+}
+```
+
 The built-in "Club architecture" example is a manual diagram traced from a
 reference image, which is why it reproduces that layout exactly.
 

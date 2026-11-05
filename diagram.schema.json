@@ -49,6 +49,10 @@
         "manual"
       ],
       "description": "auto (default) computes placement with ELK and rejects coordinates; manual places every node from its x/y and skips ELK entirely."
+    },
+    "defaults": {
+      "$ref": "#/$defs/nodeDefaults",
+      "description": "Geometry shared by every node in manual mode."
     }
   },
   "$defs": {
@@ -248,6 +252,41 @@
               }
             }
           }
+        }
+      }
+    },
+    "nodeDefaults": {
+      "type": "object",
+      "description": "Box and icon-card geometry shared by every node. A node may override any field individually. Useful for a hand-composed diagram where every card has the same size.",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Node box width shared by every node."
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Node box height shared by every node."
+        },
+        "cardX": {
+          "type": "number",
+          "description": "Icon-card offset from the node origin, shared by every node."
+        },
+        "cardY": {
+          "type": "number",
+          "description": "Icon-card offset from the node origin, shared by every node."
+        },
+        "cardWidth": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Icon-card width shared by every node; requires cardHeight."
+        },
+        "cardHeight": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Icon-card height shared by every node; requires cardWidth."
         }
       }
     }

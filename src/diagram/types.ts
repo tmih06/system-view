@@ -55,6 +55,22 @@ export interface EdgeSpec {
   /** Authored absolute label anchor: horizontal centre and text baseline. */
   labelAt?: Point;
 }
+/**
+ * Geometry shared by every node.
+ *
+ * A hand-composed diagram usually gives every card the same box and icon square,
+ * so repeating them per node is noise that must stay in sync. A node may still
+ * override any field individually.
+ */
+export interface NodeDefaults {
+  width?: number;
+  height?: number;
+  cardX?: number;
+  cardY?: number;
+  cardWidth?: number;
+  cardHeight?: number;
+}
+
 export interface DiagramSpec {
   title?: string;
   direction?: Direction;
@@ -63,6 +79,8 @@ export interface DiagramSpec {
   edges: EdgeSpec[];
   /** Prefer straight routing along these existing consecutive connections. */
   flow?: string[];
+  /** Box and icon-card geometry shared by every node in manual mode. */
+  defaults?: NodeDefaults;
   /**
    * `"manual"` places nodes from their explicit `x`/`y` and skips automatic
    * layout; `"auto"` (the default) ignores no coordinates because none are

@@ -10,8 +10,8 @@ import { scriptFor } from "./examples";
 
 /** Layout output, independent of paint: a theme change must not re-run ELK. */
 interface LaidOut { scene: Scene; icons: IconMap }
-const WIDTH_KEY = "diagram-studio:script-panel-width";
-const THEME_KEY = "diagram-studio:theme";
+const WIDTH_KEY = "system-view:script-panel-width";
+const THEME_KEY = "system-view:theme";
 
 /** Stored palette, else the OS preference; unknown values fall back to light. */
 function readStoredTheme(): ThemeName {
@@ -157,7 +157,10 @@ function App() {
         event.preventDefault();
         setEditorWidth((width) => event.key === "Home" ? 0 : event.key === "End" ? 85 : Math.max(0, Math.min(85, width + (event.key === "ArrowLeft" ? -2 : 2))));
       }}
-    />
+    >
+      {/* A real element, not a pseudo-element: it can be measured and centred. */}
+      <span className="panel-divider-pill" aria-hidden="true" />
+    </div>
     <section className="preview-pane" aria-label="Diagram preview panel" aria-busy={busy}>
       <Whiteboard
         scene={laidOut?.scene ?? null}

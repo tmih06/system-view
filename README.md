@@ -1,4 +1,4 @@
-# d2-rich-icons
+# system-view
 
 Coordinate-free system and flow diagrams in a browser. Write JSON on the left;
 see an automatically laid-out diagram on the right. SVG brand icons, two-tier
@@ -174,7 +174,7 @@ deploy a built directory manually:
 bunx wrangler pages deploy dist
 ```
 
-The configured Pages project name is `d2-rich-icons`; change it in
+The configured Pages project name is `system-view`; change it in
 `wrangler.jsonc` if you choose another name.
 
 Cloudflare references: [build settings](https://developers.cloudflare.com/pages/configuration/build-image/),

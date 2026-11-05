@@ -49,4 +49,4 @@ function startServer() {
 
 const server = startServer();
 
-console.log(`Diagram Studio listening on ${server.url}`);
+console.log(`System View listening on ${server.url}`);

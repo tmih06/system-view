@@ -475,7 +475,7 @@ export function renderDrawio(scene: Scene, icons: IconMap): string {
 
   const xml =
     `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<mxfile host="app.diagrams.net" agent="d2-rich-icons" version="26.0.0" type="device">` +
+    `<mxfile host="app.diagrams.net" agent="system-view" version="26.0.0" type="device">` +
     `<diagram id="diagram" name="${attr(scene.title || "Diagram")}">` +
     `<mxGraphModel dx="${width}" dy="${height}" grid="1" gridSize="24" guides="1" tooltips="1" ` +
     `connect="1" arrows="1" fold="0" page="0" pageWidth="${width}" pageHeight="${height}" ` +

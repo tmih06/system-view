@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Diagram Studio script",
+  "title": "System View script",
   "description": "Describe nodes, nested groups and directed connections. Use automatic layout, or supply explicit geometry for a hand-composed diagram.",
   "type": "object",
   "required": [

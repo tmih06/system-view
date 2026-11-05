@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Diagram Studio script",
+  "description": "Describe nodes, nested groups and directed connections without pixel coordinates.",
+  "type": "object",
+  "required": ["nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "title": { "type": "string" },
+    "direction": { "$ref": "#/$defs/direction" },
+    "groups": { "type": "array", "items": { "$ref": "#/$defs/group" } },
+    "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "flow": {
+      "type": "array",
+      "description": "Preferred main-flow chain. Consecutive nodes must already have a directed connection. Prefers straight routing; does not add connections or guarantee alignment.",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "direction": { "enum": ["right", "down", "left", "up"] },
+    "side": { "enum": ["north", "east", "south", "west"] },
+    "group": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "parent": { "type": "string", "minLength": 1 },
+        "tone": { "enum": ["warm", "cool", "neutral"] },
+        "dashed": { "type": "boolean" },
+        "direction": { "$ref": "#/$defs/direction" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "subtitle": { "type": "string" },
+        "icon": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "Local SVG alias, for example cloudflare, redis, hono, postgresql or github." },
+        "group": { "type": "string", "minLength": 1 },
+        "shape": { "enum": ["service", "process", "decision", "terminal"] }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "kind": { "enum": ["primary", "secondary", "async"] },
+        "fromSide": { "$ref": "#/$defs/side" },
+        "toSide": { "$ref": "#/$defs/side" }
+      }
+    }
+  }
+}

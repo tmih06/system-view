@@ -1,0 +1,392 @@
+# Recreation of the reference architecture diagram, English labels.
+#
+#   ./scripts/build.sh club
+#
+# Panels are pinned with top/left because D2's engines stack containers
+# vertically otherwise (see GUIDE.md). Everything inside a panel flows.
+#
+# Topology:
+#   attendees (visitors / staff / inventory app)
+#     -> Cloudflare edge (DNS, status, pages, bingo, stamp rally, mail, R2)
+#     -> Dokploy host (inventory system, public site, tickets, student portal)
+#   external services: GitHub, Google, Discord, ImageFlux, Google Analytics
+#   backup server behind WireGuard: RustFS
+#   separate PC: GitHub Actions runner
+#   offline photo capture: SD card -> SD Backup Manager -> NAS
+
+...@../theme.d2
+
+classes: {
+  t: {
+    label: ""
+    grid-rows: 3
+    grid-gap: 1
+    style: {fill: transparent; stroke: transparent; stroke-width: 0}
+  }
+  t-ic: {
+    shape: rectangle
+    width: 76
+    height: 76
+    icon.near: center-center
+    style: {fill: "#FFFFFF"; stroke: "#E4E8EE"; stroke-width: 1; border-radius: 17}
+  }
+  t-nm: {
+    width: 100
+    height: 15
+    label.near: center-center
+    style: {fill: transparent; stroke: transparent; stroke-width: 0; font-size: 10; bold: true; font-color: "#16202E"}
+  }
+  t-sb: {
+    width: 100
+    height: 12
+    label.near: center-center
+    style: {fill: transparent; stroke: transparent; stroke-width: 0; font: mono; font-size: 8; font-color: "#7A8697"}
+  }
+  # Sub-panel inside the host (dashed, very light).
+  sub: {
+    label.near: top-left
+    style: {fill: "#FCFDFF"; stroke: "#CBD6E4"; stroke-width: 1; stroke-dash: 3; border-radius: 12; font-size: 10; font-color: "#3D4A5C"}
+  }
+  # External services panel is grey-filled and bordered.
+  ext-panel: {
+    label.near: top-left
+    style: {fill: "#F0F4F7"; stroke: "#C7D3DE"; stroke-width: 1; border-radius: 10; font-size: 11; font-color: "#5A6779"}
+  }
+}
+
+# ── Clients ──────────────────────────────────────────────────────────────
+clients: Attendees {
+  class: cluster
+  top: 300
+  left: 10
+  grid-rows: 3
+  grid-gap: 16
+
+  web: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/webhook.svg}
+    nm: Visitors {class: t-nm}
+    sb: browser {class: t-sb}
+  }
+  pwa: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/webhook.svg}
+    nm: Staff {class: t-nm}
+    sb: PWA {class: t-sb}
+  }
+  android: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/android.svg}
+    nm: Inventory {class: t-nm}
+    sb: Android FZ-N1 {class: t-sb}
+  }
+}
+
+# ── Cloudflare edge ──────────────────────────────────────────────────────
+cf: Cloudflare {
+  class: panel
+  top: 60
+  left: 175
+  width: 360
+  grid-columns: 2
+  grid-gap: 30
+
+  status: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare-workers.svg}
+    nm: Status {class: t-nm}
+    sb: Worker + D0 {class: t-sb}
+  }
+  pages: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare-pages.svg}
+    nm: Pages {class: t-nm}
+    sb: 2026 archive {class: t-sb}
+  }
+  bingo: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare-workers.svg}
+    nm: Bingo {class: t-nm}
+    sb: draw / claims {class: t-sb}
+  }
+  dns: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare.svg}
+    nm: DNS - Proxy {class: t-nm}
+    sb: WAF / Access {class: t-sb}
+  }
+  stamps: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare-workers.svg}
+    nm: Stamp Rally {class: t-nm}
+    sb: image W + D1 {class: t-sb}
+  }
+  mail: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/resend.svg}
+    nm: Email Service {class: t-nm}
+    sb: mail delivery {class: t-sb}
+  }
+  r2: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare.svg}
+    nm: R2 {class: t-nm}
+    sb: backup store {class: t-sb}
+  }
+  turnstile: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/turnstile.svg}
+    nm: Turnstile {class: t-nm}
+    sb: bot protection {class: t-sb}
+  }
+  bak: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/cloudflare-workers.svg}
+    nm: Backup {class: t-nm}
+    sb: Worker {class: t-sb}
+  }
+
+  status -> pages {class: edge}
+  bingo -> turnstile: auth {class: edge}
+  bak -> r2 {class: edge}
+}
+
+# ── Application host ─────────────────────────────────────────────────────
+dok: Dokploy Server {
+  class: boundary
+  top: 20
+  left: 615
+  grid-columns: 2
+  grid-gap: 54
+
+  dokploy: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/docker.svg}
+    nm: Dokploy {class: t-nm}
+    sb: Traefik / auto-deploy {class: t-sb}
+  }
+
+  invsys: Inventory System (SANGISAICF) {
+    class: sub
+    grid-columns: 3
+    grid-gap: 22
+
+    inv: {
+      class: t
+      ic: "" {class: t-ic; icon: ../icons/nuxt.svg}
+      nm: Inventory {class: t-nm}
+      sb: item / Nuxt {class: t-sb}
+    }
+    invdb: {
+      class: t
+      ic: "" {class: t-ic; icon: ../icons/sqlite.svg}
+      nm: SQLite {class: t-nm}
+      sb: item / loan {class: t-sb}
+    }
+    invcache: {
+      class: t
+      ic: "" {class: t-ic; icon: ../icons/redis.svg}
+      nm: Redis {class: t-nm}
+      sb: exclusive lock {class: t-sb}
+    }
+
+    inv -> invdb {class: edge}
+    inv -> invcache {class: edge}
+  }
+
+  pub: Public Site (sanfees) {
+    class: sub
+    grid-columns: 2
+    grid-gap: 46
+
+    site: {
+      class: t
+      ic: "" {class: t-ic; icon: ../icons/nuxt.svg}
+      nm: Public Site {class: t-nm}
+      sb: sanfees.com / Nuxt {class: t-sb}
+    }
+    apigw: {
+      class: t
+      ic: "" {class: t-ic; icon: ../icons/nuxt.svg}
+      nm: API {class: t-nm}
+      sb: api / Nitro {class: t-sb}
+    }
+
+    site -> apigw: /api {class: edge-accent}
+  }
+
+  tickets: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/hono.svg}
+    nm: Tickets {class: t-nm}
+    sb: ticket / Hono x2 {class: t-sb}
+  }
+  portal: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/nuxt.svg}
+    nm: Student Portal {class: t-nm}
+    sb: student / Nuxt UI {class: t-sb}
+  }
+  tkdb: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/postgresql.svg}
+    nm: PostgreSQL {class: t-nm}
+    sb: ticket-db {class: t-sb}
+  }
+  pdb: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/postgresql.svg}
+    nm: PostgreSQL {class: t-nm}
+    sb: api-db {class: t-sb}
+  }
+  pss: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/redis.svg}
+    nm: Redis {class: t-nm}
+    sb: session / notice {class: t-sb}
+  }
+  garage: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/garage.svg}
+    nm: Garage {class: t-nm}
+    sb: image / file {class: t-sb}
+  }
+
+  pub.apigw -> tickets {class: edge}
+  pub.apigw -> pdb {class: edge}
+  pub.apigw -> pss {class: edge}
+  pub.apigw -> garage {class: edge}
+  tickets -> tkdb {class: edge}
+  portal -> pub.apigw: api {class: edge}
+  garage -> pss: s3 {class: edge}
+}
+
+# ── External services ────────────────────────────────────────────────────
+ext: External Services {
+  class: ext-panel
+  top: 40
+  left: 1300
+  width: 230
+  grid-rows: 5
+  grid-gap: 18
+
+  gh: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/github.svg}
+    nm: GitHub {class: t-nm}
+    sb: repo / CI {class: t-sb}
+  }
+  google: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/google.svg}
+    nm: Google {class: t-nm}
+    sb: login (OAuth) {class: t-sb}
+  }
+  discord: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/discord.svg}
+    nm: Discord {class: t-nm}
+    sb: notifications {class: t-sb}
+  }
+  flux: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/image.svg}
+    nm: ImageFlux {class: t-nm}
+    sb: image CDN {class: t-sb}
+  }
+  ga: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/google-analytics.svg}
+    nm: Google Analytics {class: t-nm}
+    sb: usage analytics {class: t-sb}
+  }
+
+  google -> discord: OAuth notice {class: edge}
+}
+
+# ── Backup server ────────────────────────────────────────────────────────
+backup: Backup Server (WireGuard) {
+  class: boundary
+  top: 930
+  left: 700
+  width: 520
+  height: 150
+  grid-columns: 2
+  grid-gap: 80
+
+  wg: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/wireguard.svg}
+    nm: WireGuard {class: t-nm}
+    sb: VPN endpoint {class: t-sb}
+  }
+  rustfs: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/rustfs.svg}
+    nm: RustFS {class: t-nm}
+    sb: S3 / file gen {class: t-sb}
+  }
+
+  wg -> rustfs {class: edge}
+}
+
+# ── CI runner ────────────────────────────────────────────────────────────
+ci: Separate PC (CI) {
+  class: cluster
+  top: 930
+  left: 1320
+  width: 190
+
+  runner: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/github-actions.svg}
+    nm: Actions Runner {class: t-nm}
+    sb: self-hosted x3 {class: t-sb}
+  }
+}
+
+# ── Offline capture ──────────────────────────────────────────────────────
+offline: Photo Capture (offline) {
+  class: cluster
+  top: 950
+  left: 20
+  width: 500
+  grid-columns: 3
+  grid-gap: 36
+
+  card: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/hard-drive.svg}
+    nm: SD Card {class: t-nm}
+    sb: photo media {class: t-sb}
+  }
+  mgr: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/rust.svg}
+    nm: SD Backup Mgr {class: t-nm}
+    sb: PC app / Rust {class: t-sb}
+  }
+  nas: {
+    class: t
+    ic: "" {class: t-ic; icon: ../icons/server.svg}
+    nm: NAS {class: t-nm}
+    sb: photo storage {class: t-sb}
+  }
+
+  card -> mgr {class: edge}
+  mgr -> nas: SMB {class: edge}
+}
+
+# ── Cross-panel connections ──────────────────────────────────────────────
+clients.web -> cf.dns: HTTPS {class: edge-accent}
+clients.pwa -> cf.dns: HTTPS {class: edge-accent}
+clients.android -> cf.dns: HTTPS {class: edge-accent}
+
+cf.dns -> dok.dokploy: HTTPS {class: edge-accent}
+dok.dokploy -> dok.pub.apigw: HTTPS {class: edge-accent}
+cf.mail -> dok.pub.apigw: mail {class: edge}
+dok.tkdb -> cf.bak: DB backup {class: edge}
+cf.bak -> backup.wg: hourly {class: edge}
+ext.gh -> ci.runner: CI {class: edge-dashed}
+ci.runner -> dok.dokploy: push {class: edge-dashed}
+dok.pub.apigw -> ext.flux: fetch images {class: edge}

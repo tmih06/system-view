@@ -1,0 +1,1323 @@
+import { theme } from "./theme";
+import type {
+  Direction,
+  EdgeKind,
+  MeasureText,
+  Point,
+  Rect,
+  Scene,
+  SceneEdge,
+  SceneGroup,
+  SceneNode,
+  Shape,
+  Side,
+  Tone,
+} from "./types";
+
+/**
+ * Coordinate-free diagram layout.
+ *
+ * `layoutDiagram` validates an untrusted `DiagramSpec`, measures every caption
+ * with the caller's text measurement callback, hands a sized graph to ELK's
+ * layered algorithm and translates the result into a `Scene` whose coordinates
+ * are all absolute. No pixel geometry is accepted from the input, and none is
+ * invented here: every number either comes from measured text, from an anchor
+ * position ELK must respect, or from ELK's own output.
+ *
+ * Why this shape:
+ * - One ELK run with `INCLUDE_CHILDREN` routes connectors across group
+ *   boundaries, which a per-group recursive layout cannot do.
+ * - Each node rectangle is sized to its *full footprint* (icon card plus
+ *   caption, or a body shape's text block). ELK treats node rectangles as
+ *   obstacles, so captions are protected from connectors by construction.
+ * - Connector anchors are explicit ports pinned with `FIXED_POS`, so east/west
+ *   endpoints sit at icon-card centre height rather than at the border of the
+ *   wider, invisible caption box. Endpoints are then pulled onto the visible
+ *   card edge; north/south endpoints already meet the footprint border, which is
+ *   the card top and the space below the caption.
+ *
+ * Documented limits:
+ * - A group's own `direction` is honoured only when the group is *closed*: no
+ *   connector crosses its border. ELK cannot lay out a self-directed subtree in
+ *   its own run and still route crossing connectors, so an open group follows
+ *   the enclosing direction rather than emitting broken geometry.
+ * - `flow` is a routing preference: existing edges along the declared chain get
+ *   a high straightness priority. It never adds connections and never
+ *   guarantees exact alignment.
+ */
+const CARD = theme.cardSize;
+const CAPTION_GAP = 8;
+const SUBTITLE_GAP = 3;
+const TITLE_LINE_HEIGHT = theme.titleLineHeight;
+const SUBTITLE_LINE_HEIGHT = theme.subtitleLineHeight;
+
+/** Wrap width for service captions; wider titles wrap instead of widening cards. */
+const CAPTION_WRAP = 172;
+/** Wrap width inside process/terminal bodies. */
+const BODY_WRAP = 184;
+/** Wrap width inside decision diamonds, which need about twice the text width. */
+const DECISION_WRAP = 136;
+/** Wrap width for connector labels. */
+const EDGE_LABEL_WRAP = 176;
+
+const BODY_PAD_X = 18;
+const BODY_PAD_Y = 13;
+const BODY_MIN_WIDTH = 120;
+const BODY_MIN_HEIGHT = 52;
+const DECISION_MIN_WIDTH = 152;
+const DECISION_MIN_HEIGHT = 96;
+
+const GROUP_PAD_TOP = 34;
+const GROUP_PAD_SIDE = 18;
+const GROUP_PAD_BOTTOM = 18;
+/** Horizontal room a group label needs beside its padding. */
+const GROUP_LABEL_GUTTER = 12;
+const ROOT_PAD = 24;
+
+const NODE_SPACING = 36;
+const LAYER_SPACING = 64;
+const COMPONENT_SPACING = 48;
+const EDGE_NODE_SPACING = 18;
+const EDGE_EDGE_SPACING = 12;
+const EDGE_LABEL_SPACING = 6;
+
+/** Tolerance for treating two coordinates as the same point or the same border. */
+const EPS = 0.75;
+/** Preference weights for edges on the declared main flow chain. */
+const FLOW_DIRECTION = "100";
+const FLOW_STRAIGHTNESS = "100";
+
+const TITLE_FONT = `bold ${theme.titleSize}px ${theme.fontFamily}`;
+const SUBTITLE_FONT = `${theme.subtitleSize}px ${theme.monoFamily}`;
+const GROUP_FONT = `bold ${theme.groupSize}px ${theme.fontFamily}`;
+/**
+ * Edge label font. Both exporters paint connector labels with the mono family,
+ * so measurement has to use it too, otherwise the reserved label box is narrow
+ * for the glyphs actually drawn.
+ */
+const EDGE_FONT = `${theme.edgeSize}px ${theme.monoFamily}`;
+
+const DIRECTIONS = ["right", "down", "left", "up"] as const satisfies readonly Direction[];
+const SIDES = ["north", "east", "south", "west"] as const satisfies readonly Side[];
+const TONES = ["warm", "cool", "neutral"] as const satisfies readonly Tone[];
+const SHAPES = ["service", "process", "decision", "terminal"] as const satisfies readonly Shape[];
+const KINDS = ["primary", "secondary", "async"] as const satisfies readonly EdgeKind[];
+
+const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow"];
+const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction"];
+const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape"];
+const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide"];
+
+const DIRECTION_TO_ELK: Record<Direction, string> = {
+  right: "RIGHT",
+  down: "DOWN",
+  left: "LEFT",
+  up: "UP",
+};
+
+/** Side a connector leaves on, and enters on, for a forward edge. */
+const OUTGOING_SIDE: Record<Direction, Side> = { right: "east", down: "south", left: "west", up: "north" };
+/** Clockwise successor of a side; gives self-loops two distinct anchors. */
+const NEXT_SIDE: Record<Side, Side> = { north: "east", east: "south", south: "west", west: "north" };
+const PREVIOUS_SIDE: Record<Side, Side> = { north: "west", east: "north", south: "east", west: "south" };
+
+function oppositeSide(side: Side): Side {
+  return side === "east" ? "west" : side === "west" ? "east" : side === "north" ? "south" : "north";
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+interface ValidatedGroup {
+  id: string;
+  label: string;
+  parent?: string;
+  tone: Tone;
+  dashed: boolean;
+  direction?: Direction;
+}
+
+interface ValidatedNode {
+  id: string;
+  label: string;
+  subtitle?: string;
+  icon?: string;
+  group?: string;
+  shape: Shape;
+  /** Declaration index; used only as a deterministic reading-order hint. */
+  order: number;
+}
+
+interface ValidatedEdge {
+  /** Emitted identifier: the authored id, or a deterministic generated one. */
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+  kind: EdgeKind;
+  fromSide?: Side;
+  toSide?: Side;
+}
+
+interface ValidatedDiagram {
+  title: string;
+  direction: Direction;
+  groups: ValidatedGroup[];
+  nodes: ValidatedNode[];
+  edges: ValidatedEdge[];
+  flow: string[];
+}
+
+type JsonObject = Record<string, unknown>;
+
+function describeValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  return typeof value;
+}
+
+/** Throw a path-qualified validation error. Never returns. */
+function fail(path: string, message: string): never {
+  throw new Error(`Diagram script ${path}: ${message}`);
+}
+
+function readObject(value: unknown, path: string): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    fail(path, `expected an object, received ${describeValue(value)}`);
+  }
+  return value as JsonObject;
+}
+
+function rejectUnknownFields(value: JsonObject, allowed: readonly string[], path: string): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      fail(path, `unknown field "${key}"; allowed fields are ${allowed.map((name) => `"${name}"`).join(", ")}`);
+    }
+  }
+}
+
+function readString(value: unknown, path: string, requireNonEmpty: boolean): string {
+  if (typeof value !== "string") fail(path, `expected a string, received ${describeValue(value)}`);
+  if (requireNonEmpty && value.trim() === "") fail(path, "must not be empty");
+  return value;
+}
+
+function readOptionalString(value: unknown, path: string, requireNonEmpty: boolean): string | undefined {
+  return value === undefined ? undefined : readString(value, path, requireNonEmpty);
+}
+
+function readBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") fail(path, `expected a boolean, received ${describeValue(value)}`);
+  return value;
+}
+
+function readEnum<T extends string>(value: unknown, path: string, allowed: readonly T[]): T {
+  if (typeof value === "string" && (allowed as readonly string[]).includes(value)) return value as T;
+  const received = typeof value === "string" ? `"${value}"` : describeValue(value);
+  fail(path, `expected one of ${allowed.map((name) => `"${name}"`).join(", ")}, received ${received}`);
+}
+
+function readOptionalEnum<T extends string>(value: unknown, path: string, allowed: readonly T[]): T | undefined {
+  return value === undefined ? undefined : readEnum(value, path, allowed);
+}
+
+function readArray(value: unknown, path: string): unknown[] {
+  if (!Array.isArray(value)) fail(path, `expected an array, received ${describeValue(value)}`);
+  return value;
+}
+
+/**
+ * Validate an untrusted diagram script and normalise it.
+ *
+ * Mirrors `diagram.schema.json`: unknown fields are rejected rather than
+ * silently ignored, ids and labels must be non-empty, ids are unique across
+ * groups and nodes, and group parents must exist and be acyclic. Connector
+ * cycles are legal (ELK reverses them while breaking cycles); only containment
+ * cycles are errors.
+ *
+ * @throws Error with a path-qualified message, e.g. `edges[2].to: unknown node "api"`.
+ */
+function validateDiagram(input: unknown): ValidatedDiagram {
+  const root = readObject(input, "(root)");
+  rejectUnknownFields(root, ROOT_FIELDS, "(root)");
+
+  const title = root.title === undefined ? "" : readString(root.title, "title", false);
+  const direction = root.direction === undefined ? "right" : readEnum(root.direction, "direction", DIRECTIONS);
+
+  const rawGroups = root.groups === undefined ? [] : readArray(root.groups, "groups");
+  const rawNodes = readArray(root.nodes, "nodes");
+  if (rawNodes.length === 0) fail("nodes", "must declare at least one node");
+
+  const groups: ValidatedGroup[] = [];
+  const groupById = new Map<string, ValidatedGroup>();
+  rawGroups.forEach((entry, index) => {
+    const path = `groups[${index}]`;
+    const value = readObject(entry, path);
+    rejectUnknownFields(value, GROUP_FIELDS, path);
+    const id = readString(value.id, `${path}.id`, true);
+    if (groupById.has(id)) fail(`${path}.id`, `duplicate group id "${id}"`);
+    const group: ValidatedGroup = {
+      id,
+      label: readString(value.label, `${path}.label`, true),
+      parent: readOptionalString(value.parent, `${path}.parent`, true),
+      tone: value.tone === undefined ? "neutral" : readEnum(value.tone, `${path}.tone`, TONES),
+      dashed: value.dashed === undefined ? false : readBoolean(value.dashed, `${path}.dashed`),
+      direction: readOptionalEnum(value.direction, `${path}.direction`, DIRECTIONS),
+    };
+    groups.push(group);
+    groupById.set(id, group);
+  });
+
+  for (const group of groups) {
+    if (group.parent !== undefined && !groupById.has(group.parent)) {
+      fail(`groups[id="${group.id}"].parent`, `unknown group "${group.parent}"`);
+    }
+  }
+  assertAcyclicGroups(groups, groupById);
+
+  const nodes: ValidatedNode[] = [];
+  const nodeById = new Map<string, ValidatedNode>();
+  rawNodes.forEach((entry, index) => {
+    const path = `nodes[${index}]`;
+    const value = readObject(entry, path);
+    rejectUnknownFields(value, NODE_FIELDS, path);
+    const id = readString(value.id, `${path}.id`, true);
+    if (nodeById.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`);
+    if (groupById.has(id)) fail(`${path}.id`, `id "${id}" is already used by a group`);
+    const icon = readOptionalString(value.icon, `${path}.icon`, true);
+    if (icon !== undefined && !/^[a-z0-9-]+$/.test(icon)) {
+      fail(`${path}.icon`, `expected a lowercase alias such as "cloudflare" or "postgresql", received "${icon}"`);
+    }
+    const group = readOptionalString(value.group, `${path}.group`, true);
+    if (group !== undefined && !groupById.has(group)) fail(`${path}.group`, `unknown group "${group}"`);
+    const subtitle = readOptionalString(value.subtitle, `${path}.subtitle`, false);
+    const node: ValidatedNode = {
+      id,
+      label: readString(value.label, `${path}.label`, true),
+      subtitle: subtitle === undefined || subtitle.trim() === "" ? undefined : subtitle,
+      icon,
+      group,
+      order: index,
+      shape:
+        value.shape === undefined
+          ? icon === undefined
+            ? "process"
+            : "service"
+          : readEnum(value.shape, `${path}.shape`, SHAPES),
+    };
+    nodes.push(node);
+    nodeById.set(id, node);
+  });
+
+  const rawEdges = readArray(root.edges, "edges");
+  const edges: ValidatedEdge[] = [];
+  const explicitIds = new Set<string>();
+  rawEdges.forEach((entry, index) => {
+    const path = `edges[${index}]`;
+    const value = readObject(entry, path);
+    rejectUnknownFields(value, EDGE_FIELDS, path);
+    const explicitId = readOptionalString(value.id, `${path}.id`, true);
+    if (explicitId !== undefined) {
+      if (explicitIds.has(explicitId)) fail(`${path}.id`, `duplicate edge id "${explicitId}"`);
+      explicitIds.add(explicitId);
+    }
+    const from = readString(value.from, `${path}.from`, true);
+    const to = readString(value.to, `${path}.to`, true);
+    if (!nodeById.has(from)) fail(`${path}.from`, `unknown node "${from}"`);
+    if (!nodeById.has(to)) fail(`${path}.to`, `unknown node "${to}"`);
+    const label = readOptionalString(value.label, `${path}.label`, false);
+    edges.push({
+      id: explicitId ?? "",
+      from,
+      to,
+      label: label === undefined || label.trim() === "" ? undefined : label,
+      kind: value.kind === undefined ? "secondary" : readEnum(value.kind, `${path}.kind`, KINDS),
+      fromSide: readOptionalEnum(value.fromSide, `${path}.fromSide`, SIDES),
+      toSide: readOptionalEnum(value.toSide, `${path}.toSide`, SIDES),
+    });
+  });
+
+  // Deterministic ids for edges authored without one; explicit ids win and are
+  // never reused, so every SceneEdge id is unique.
+  const usedIds = new Set<string>(explicitIds);
+  for (const edge of edges) {
+    if (edge.id !== "") continue;
+    const base = `${edge.from}->${edge.to}`;
+    let candidate = base;
+    for (let suffix = 2; usedIds.has(candidate); suffix += 1) candidate = `${base}~${suffix}`;
+    usedIds.add(candidate);
+    edge.id = candidate;
+  }
+
+  const flow = root.flow === undefined ? [] : readFlow(root.flow, edges, nodeById);
+
+  return { title, direction, groups, nodes, edges, flow };
+}
+
+/** Reject containment cycles such as `a.parent = b` and `b.parent = a`. */
+function assertAcyclicGroups(groups: ValidatedGroup[], groupById: Map<string, ValidatedGroup>): void {
+  for (const group of groups) {
+    const chain: string[] = [group.id];
+    const seen = new Set<string>(chain);
+    let parent = group.parent;
+    while (parent !== undefined) {
+      if (seen.has(parent)) {
+        fail(`groups[id="${group.id}"].parent`, `containment cycle: ${[...chain, parent].join(" -> ")}`);
+      }
+      seen.add(parent);
+      chain.push(parent);
+      parent = groupById.get(parent)?.parent;
+    }
+  }
+}
+
+/**
+ * Validate the optional preferred flow chain.
+ *
+ * The chain is a preference: consecutive nodes must already be connected by a
+ * directed edge, and those edges get a high straightness priority. It never
+ * adds connections and never forces exact alignment.
+ */
+function readFlow(value: unknown, edges: ValidatedEdge[], nodeById: Map<string, ValidatedNode>): string[] {
+  const entries = readArray(value, "flow");
+  const flow: string[] = [];
+  const seen = new Set<string>();
+  entries.forEach((entry, index) => {
+    const path = `flow[${index}]`;
+    const id = readString(entry, path, true);
+    if (seen.has(id)) fail(path, `duplicate node "${id}" in flow`);
+    if (!nodeById.has(id)) fail(path, `unknown node "${id}"`);
+    seen.add(id);
+    flow.push(id);
+  });
+  for (let index = 1; index < flow.length; index += 1) {
+    const from = flow[index - 1];
+    const to = flow[index];
+    if (!edges.some((edge) => edge.from === from && edge.to === to)) {
+      fail(`flow[${index - 1}..${index}]`, `no directed connection "${from}" -> "${to}"; flow must follow existing edges`);
+    }
+  }
+  return flow;
+}
+
+// ---------------------------------------------------------------------------
+// Text measurement and node metrics
+// ---------------------------------------------------------------------------
+
+interface MeasuredText {
+  lines: string[];
+  width: number;
+  height: number;
+}
+
+/**
+ * Greedy word wrap using the caller's measurement callback.
+ *
+ * Explicit newlines are hard breaks. A single word wider than `maxWidth` stays
+ * on its own line: breaking inside a word would misreport what the renderer
+ * draws, and an over-wide node is better than a measurement lie.
+ */
+function measureTextBlock(
+  text: string,
+  font: string,
+  maxWidth: number,
+  lineHeight: number,
+  measure: MeasureText,
+): MeasuredText {
+  const lines: string[] = [];
+  for (const paragraph of text.split(/\r\n|\r|\n/)) {
+    const words = paragraph.split(/\s+/).filter((word) => word !== "");
+    if (words.length === 0) {
+      lines.push("");
+      continue;
+    }
+    let current = words[0];
+    for (const word of words.slice(1)) {
+      const candidate = `${current} ${word}`;
+      if (measure(candidate, font) <= maxWidth) current = candidate;
+      else {
+        lines.push(current);
+        current = word;
+      }
+    }
+    lines.push(current);
+  }
+  let width = 0;
+  for (const line of lines) width = Math.max(width, measure(line, font));
+  return { lines, width, height: lines.length * lineHeight };
+}
+
+interface NodeMetrics {
+  node: ValidatedNode;
+  shape: Shape;
+  width: number;
+  height: number;
+  labelLines: string[];
+  subtitleLines: string[];
+  /** Icon card relative to the node origin; service nodes only. */
+  card: Rect | null;
+  /** Local y of the east/west attachment points. */
+  sideY: number;
+}
+
+/**
+ * Size one node from its measured caption.
+ *
+ * Service nodes stack card and caption, so the footprint always covers the
+ * caption. Body shapes must fit a centred title/subtitle block inside the
+ * shape; a decision diamond needs roughly twice the text box because the text
+ * sits on the diamond's inscribed rectangle.
+ */
+function measureNode(node: ValidatedNode, measure: MeasureText): NodeMetrics {
+  const wrap = node.shape === "service" ? CAPTION_WRAP : node.shape === "decision" ? DECISION_WRAP : BODY_WRAP;
+  const title = measureTextBlock(node.label, TITLE_FONT, wrap, TITLE_LINE_HEIGHT, measure);
+  const subtitle =
+    node.subtitle === undefined
+      ? { lines: [] as string[], width: 0, height: 0 }
+      : measureTextBlock(node.subtitle, SUBTITLE_FONT, wrap, SUBTITLE_LINE_HEIGHT, measure);
+  const textWidth = Math.max(title.width, subtitle.width);
+
+  if (node.shape === "service") {
+    const width = Math.max(CARD, Math.ceil(textWidth));
+    const height =
+      CARD + CAPTION_GAP + title.height + (subtitle.lines.length > 0 ? SUBTITLE_GAP + subtitle.height : 0);
+    return {
+      node,
+      shape: node.shape,
+      width,
+      height,
+      labelLines: title.lines,
+      subtitleLines: subtitle.lines,
+      card: { x: (width - CARD) / 2, y: 0, width: CARD, height: CARD },
+      sideY: CARD / 2,
+    };
+  }
+
+  const textHeight = title.height + (subtitle.lines.length > 0 ? SUBTITLE_GAP + subtitle.height : 0);
+  const width =
+    node.shape === "decision"
+      ? Math.max(DECISION_MIN_WIDTH, Math.ceil(textWidth * 2) + BODY_PAD_X)
+      : Math.max(BODY_MIN_WIDTH, Math.ceil(textWidth) + BODY_PAD_X * 2);
+  const height =
+    node.shape === "decision"
+      ? Math.max(DECISION_MIN_HEIGHT, Math.ceil(textHeight * 2) + BODY_PAD_Y)
+      : Math.max(BODY_MIN_HEIGHT, Math.ceil(textHeight) + BODY_PAD_Y * 2);
+  return {
+    node,
+    shape: node.shape,
+    width,
+    height,
+    labelLines: title.lines,
+    subtitleLines: subtitle.lines,
+    card: null,
+    sideY: height / 2,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Graph structure
+// ---------------------------------------------------------------------------
+
+/** Groups in parent-before-child order, following declaration order. */
+function orderGroups(groups: ValidatedGroup[]): ValidatedGroup[] {
+  const byParent = new Map<string | undefined, ValidatedGroup[]>();
+  for (const group of groups) {
+    const siblings = byParent.get(group.parent) ?? [];
+    siblings.push(group);
+    byParent.set(group.parent, siblings);
+  }
+  const ordered: ValidatedGroup[] = [];
+  const visit = (parent: string | undefined): void => {
+    for (const group of byParent.get(parent) ?? []) {
+      ordered.push(group);
+      visit(group.id);
+    }
+  };
+  visit(undefined);
+  return ordered;
+}
+
+/**
+ * Map each group id to the node ids inside its subtree.
+ *
+ * A group is *closed* when no connector crosses its border; only then may ELK
+ * lay its subtree out in a separate run (and honour the group's direction)
+ * without detaching connectors.
+ */
+function collectSubtreeNodes(groups: ValidatedGroup[], nodes: ValidatedNode[]): Map<string, Set<string>> {
+  const parentById = new Map(groups.map((group) => [group.id, group.parent]));
+  const members = new Map<string, Set<string>>(groups.map((group) => [group.id, new Set<string>()]));
+  for (const node of nodes) {
+    const seen = new Set<string>();
+    let current = node.group;
+    while (current !== undefined && !seen.has(current)) {
+      seen.add(current);
+      members.get(current)?.add(node.id);
+      current = parentById.get(current);
+    }
+  }
+  return members;
+}
+
+/**
+ * Innermost container enclosing both endpoints: a group id, or `undefined` for
+ * the root graph. ELK requires an edge to live in a container holding both of
+ * its endpoints, and closure guarantees no edge crosses a separately laid out
+ * group, so this choice is always accepted.
+ */
+function jointContainer(
+  nodeA: ValidatedNode,
+  nodeB: ValidatedNode,
+  parentById: Map<string, string | undefined>,
+): string | undefined {
+  const chain = (node: ValidatedNode): Array<string | undefined> => {
+    const result: Array<string | undefined> = [];
+    let current = node.group;
+    while (current !== undefined) {
+      result.push(current);
+      current = parentById.get(current);
+    }
+    result.push(undefined);
+    return result;
+  };
+  const other = new Set<string | undefined>(chain(nodeB));
+  return chain(nodeA).find((candidate) => other.has(candidate));
+}
+
+interface NodePlacement {
+  node: ValidatedNode;
+  metrics: NodeMetrics;
+  ports: Map<Side, string>;
+}
+
+/**
+ * Resolve both anchor sides for a connector.
+ *
+ * Explicit sides win. When only one end is explicit, the other uses the
+ * opposite side so the route stays axis-aligned. Otherwise the pair follows the
+ * `direction` of the layout run that places this connector (see
+ * `effectiveDirections`), and a connector whose target is declared *before* its
+ * source (a back edge) is anchored the other way round so ELK routes it around
+ * the flow instead of through it.
+ *
+ * Declaration order is a reading-order hint, not geometry: it keeps side
+ * selection deterministic and independent of coordinates.
+ */
+function selectSides(
+  edge: ValidatedEdge,
+  from: ValidatedNode,
+  to: ValidatedNode,
+  direction: Direction,
+): { from: Side; to: Side } {
+  if (edge.from === edge.to) {
+    if (edge.fromSide !== undefined && edge.toSide !== undefined) {
+      return edge.fromSide === edge.toSide
+        ? { from: edge.fromSide, to: NEXT_SIDE[edge.fromSide] }
+        : { from: edge.fromSide, to: edge.toSide };
+    }
+    if (edge.fromSide !== undefined) return { from: edge.fromSide, to: NEXT_SIDE[edge.fromSide] };
+    if (edge.toSide !== undefined) return { from: PREVIOUS_SIDE[edge.toSide], to: edge.toSide };
+    const from = OUTGOING_SIDE[direction];
+    return { from, to: NEXT_SIDE[from] };
+  }
+
+  const forward = OUTGOING_SIDE[direction];
+  const derived = to.order >= from.order
+    ? { from: forward, to: oppositeSide(forward) }
+    : { from: oppositeSide(forward), to: forward };
+
+  if (edge.fromSide !== undefined && edge.toSide !== undefined) {
+    return { from: edge.fromSide, to: edge.toSide };
+  }
+  if (edge.fromSide !== undefined) return { from: edge.fromSide, to: oppositeSide(edge.fromSide) };
+  if (edge.toSide !== undefined) return { from: oppositeSide(edge.toSide), to: edge.toSide };
+  return derived;
+}
+
+/**
+ * Local anchor position on one side of a node.
+ *
+ * East/west anchors sit at icon-card centre height rather than the middle of the
+ * full footprint, so a horizontal connector leaves at card level. North sits on
+ * the footprint top, which is the card top for services; south sits below the
+ * caption, matching the reference artwork.
+ */
+function portPosition(metrics: NodeMetrics, side: Side): Point {
+  switch (side) {
+    case "north":
+      return { x: metrics.width / 2, y: 0 };
+    case "south":
+      return { x: metrics.width / 2, y: metrics.height };
+    case "east":
+      return { x: metrics.width, y: metrics.sideY };
+    case "west":
+      return { x: 0, y: metrics.sideY };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ELK model
+// ---------------------------------------------------------------------------
+
+/** Subset of ELK's graph model this module builds, typed locally on purpose. */
+interface ElkGraphNode {
+  id: string;
+  width?: number;
+  height?: number;
+  layoutOptions?: Record<string, string>;
+  labels?: Array<{ text: string; width: number; height: number }>;
+  ports?: Array<{ id: string; x: number; y: number; width: number; height: number; layoutOptions: Record<string, string> }>;
+  children?: ElkGraphNode[];
+  edges?: ElkGraphEdge[];
+}
+
+interface ElkGraphEdge {
+  id: string;
+  sources: string[];
+  targets: string[];
+  labels?: Array<{ text: string; width: number; height: number }>;
+  layoutOptions?: Record<string, string>;
+}
+
+interface ElkPoint {
+  x: number;
+  y: number;
+}
+
+interface ElkSection {
+  id: string;
+  startPoint: ElkPoint;
+  endPoint: ElkPoint;
+  bendPoints?: ElkPoint[];
+  incomingSections?: string[];
+  outgoingSections?: string[];
+}
+
+interface ElkResultNode {
+  id: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  children?: ElkResultNode[];
+  edges?: Array<{ id: string; sections?: ElkSection[]; labels?: Array<{ x?: number; y?: number; width?: number; height?: number }> }>;
+}
+
+interface ElkEngine {
+  layout(graph: ElkGraphNode): Promise<ElkResultNode>;
+}
+
+function paddingExpr(top: number, side: number, bottom: number): string {
+  return `[top=${top},left=${side},bottom=${bottom},right=${side}]`;
+}
+
+/**
+ * Root layout options.
+ *
+ * The directed layered algorithm is the only ELK algorithm that combines
+ * layers, orthogonal routing and ports. Options are spelled out rather than
+ * left to defaults so the result stays stable across ELK patch releases.
+ */
+function rootLayoutOptions(direction: Direction): Record<string, string> {
+  return {
+    "elk.algorithm": "layered",
+    "elk.direction": DIRECTION_TO_ELK[direction],
+    "elk.edgeRouting": "ORTHOGONAL",
+    "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+    "elk.padding": paddingExpr(ROOT_PAD, ROOT_PAD, ROOT_PAD),
+    "elk.spacing.nodeNode": String(NODE_SPACING),
+    "elk.spacing.componentComponent": String(COMPONENT_SPACING),
+    "elk.spacing.edgeNode": String(EDGE_NODE_SPACING),
+    "elk.spacing.edgeEdge": String(EDGE_EDGE_SPACING),
+    "elk.spacing.edgeLabel": String(EDGE_LABEL_SPACING),
+    "elk.separateConnectedComponents": "true",
+    "elk.layered.spacing.nodeNodeBetweenLayers": String(LAYER_SPACING),
+    "elk.layered.spacing.edgeNodeBetweenLayers": String(EDGE_NODE_SPACING),
+    "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+    "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+    "elk.edgeLabels.placement": "CENTER",
+    // Fixed seed: the layered pipeline must not depend on iteration order.
+    "elk.randomSeed": "1",
+  };
+}
+
+/**
+ * Per-group layout options.
+ *
+ * `MINIMUM_SIZE` reserves room for the group label so a short-content group
+ * never shrinks under its own heading. The label text itself is not handed to
+ * ELK: exporters draw it inside the reserved top padding, and a real node label
+ * would make ELK indent the children by a label-dependent amount.
+ *
+ * A group whose direction is honoured is marked `SEPARATE_CHILDREN`, which makes
+ * ELK lay its subtree out in an independent run; `closed` guarantees no
+ * connector has to cross that border (see the closure computation).
+ */
+function groupLayoutOptions(
+  direction: Direction,
+  closed: boolean,
+  labelWidth: number,
+): Record<string, string> {
+  const minimumWidth = Math.ceil(labelWidth) + GROUP_PAD_SIDE * 2 + GROUP_LABEL_GUTTER;
+  const options: Record<string, string> = {
+    "elk.padding": paddingExpr(GROUP_PAD_TOP, GROUP_PAD_SIDE, GROUP_PAD_BOTTOM),
+    "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
+    "elk.nodeSize.minimum": `(${minimumWidth},${GROUP_PAD_TOP + GROUP_PAD_BOTTOM})`,
+    "elk.direction": DIRECTION_TO_ELK[direction],
+  };
+  if (closed) {
+    Object.assign(options, {
+      "elk.hierarchyHandling": "SEPARATE_CHILDREN",
+      "elk.edgeRouting": "ORTHOGONAL",
+      "elk.spacing.nodeNode": String(NODE_SPACING),
+      "elk.layered.spacing.nodeNodeBetweenLayers": String(LAYER_SPACING),
+      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.edgeLabels.placement": "CENTER",
+      "elk.randomSeed": "1",
+    });
+  }
+  return options;
+}
+
+function buildPorts(placement: NodePlacement): ElkGraphNode["ports"] {
+  const ports: NonNullable<ElkGraphNode["ports"]> = [];
+  for (const [side, id] of placement.ports) {
+    const point = portPosition(placement.metrics, side);
+    ports.push({
+      id,
+      x: point.x,
+      y: point.y,
+      width: 0,
+      height: 0,
+      layoutOptions: { "elk.port.side": side.toUpperCase() },
+    });
+  }
+  return ports;
+}
+
+/**
+ * Routing preferences per connector kind.
+ *
+ * `elk.layered.priority.direction` is what the layered algorithm consults while
+ * breaking cycles: an edge with a high value is far more likely to be routed
+ * with the overall direction instead of being reversed into a long return loop.
+ * The declared flow chain therefore gets the strongest preference, authored
+ * `primary` edges the next, and async edges none: a background notification
+ * should yield to the request path rather than fight it.
+ */
+const EDGE_PRIORITIES: Record<EdgeKind, { direction: string; straightness: string }> = {
+  primary: { direction: "30", straightness: "40" },
+  secondary: { direction: "10", straightness: "0" },
+  async: { direction: "0", straightness: "0" },
+};
+
+function buildEdge(
+  elkId: string,
+  edge: ValidatedEdge,
+  from: NodePlacement,
+  to: NodePlacement,
+  sides: { from: Side; to: Side },
+  label: { text: string; width: number; height: number } | undefined,
+  onFlow: boolean,
+): ElkGraphEdge {
+  const result: ElkGraphEdge = {
+    id: elkId,
+    sources: [from.ports.get(sides.from) ?? `n:${from.node.id}`],
+    targets: [to.ports.get(sides.to) ?? `n:${to.node.id}`],
+  };
+  if (label !== undefined) result.labels = [label];
+  const priority = onFlow
+    ? { direction: FLOW_DIRECTION, straightness: FLOW_STRAIGHTNESS }
+    : EDGE_PRIORITIES[edge.kind];
+  const options: Record<string, string> = {};
+  if (priority.direction !== "0") options["elk.layered.priority.direction"] = priority.direction;
+  if (priority.straightness !== "0") options["elk.layered.priority.straightness"] = priority.straightness;
+  if (Object.keys(options).length > 0) result.layoutOptions = options;
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Engine loading
+// ---------------------------------------------------------------------------
+
+interface ElkConstructorModule {
+  default?: new () => ElkEngine;
+}
+
+let enginePromise: Promise<ElkEngine> | null = null;
+
+/**
+ * Load ELK once and reuse the engine.
+ *
+ * elkjs decides at import time between "browser worker scope" and "CommonJS
+ * export" by testing for `document`. Bun and Node define `self` but not
+ * `document`, which lands on the worker branch and leaves the fake worker
+ * unexported, so construction fails. Supplying a temporary empty `document`
+ * during import and construction selects the CommonJS branch there; a real
+ * browser keeps its own `document` and this branch is never taken. The shim is
+ * removed in a `finally`, so no global state leaks into the host page.
+ */
+function loadEngine(): Promise<ElkEngine> {
+  enginePromise ??= (async () => {
+    const host = globalThis as { document?: unknown };
+    const needsShim = typeof host.document === "undefined";
+    if (needsShim) host.document = {};
+    try {
+      const module = (await import("elkjs/lib/elk.bundled.js")) as unknown as ElkConstructorModule;
+      const Constructor = module.default;
+      if (typeof Constructor !== "function") {
+        throw new Error('Layout engine unavailable: "elkjs/lib/elk.bundled.js" exported no constructor');
+      }
+      return new Constructor();
+    } finally {
+      if (needsShim) delete host.document;
+    }
+  })();
+  return enginePromise;
+}
+
+// ---------------------------------------------------------------------------
+// Result translation
+// ---------------------------------------------------------------------------
+
+function num(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** Round to hundredths so exported geometry stays readable and stable. */
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Snap a polyline onto axis-aligned segments.
+ *
+ * ELK's orthogonal router already returns axis-aligned segments up to
+ * floating-point error; rounding keeps exports readable, and any pair that
+ * still differs on both axes receives an explicit corner instead of a silent
+ * diagonal. Consecutive duplicates are dropped.
+ */
+function orthogonalize(raw: Point[]): Point[] {
+  const points: Point[] = [];
+  for (const candidate of raw) {
+    const next = { x: round(candidate.x), y: round(candidate.y) };
+    const previous = points[points.length - 1];
+    if (previous === undefined) {
+      points.push(next);
+      continue;
+    }
+    const dx = Math.abs(next.x - previous.x);
+    const dy = Math.abs(next.y - previous.y);
+    if (dx < 0.01 && dy < 0.01) continue;
+    if (dy < 0.01) points.push({ x: next.x, y: previous.y });
+    else if (dx < 0.01) points.push({ x: previous.x, y: next.y });
+    else {
+      points.push({ x: next.x, y: previous.y });
+      points.push(next);
+    }
+  }
+  return points;
+}
+
+/**
+ * Pull a card-level endpoint onto the visible icon card.
+ *
+ * Node footprints include the caption, which is wider than the 64 px card, so a
+ * horizontal connector pinned to the footprint border would stop beside the
+ * caption instead of touching the card. Only horizontal endpoints whose height
+ * is within the card are moved, which keeps every segment axis-aligned.
+ */
+function trimToCard(points: Point[], metrics: NodeMetrics, absolute: Rect, atStart: boolean): void {
+  const card = metrics.card;
+  if (card === null || points.length < 2) return;
+  const endpoint = points[atStart ? 0 : points.length - 1];
+  const neighbour = points[atStart ? 1 : points.length - 2];
+  if (Math.abs(endpoint.y - neighbour.y) > EPS) return;
+  const cardLeft = absolute.x + card.x;
+  const cardRight = cardLeft + card.width;
+  const cardCenterY = absolute.y + card.y + card.height / 2;
+  if (Math.abs(endpoint.y - cardCenterY) > card.height / 2 + EPS) return;
+  const borderLeft = absolute.x;
+  const borderRight = absolute.x + absolute.width;
+  if (Math.abs(endpoint.x - borderLeft) <= EPS && endpoint.x < cardLeft) {
+    endpoint.x = round(cardLeft);
+  } else if (Math.abs(endpoint.x - borderRight) <= EPS && endpoint.x > cardRight) {
+    endpoint.x = round(cardRight);
+  }
+}
+
+/** Order an edge's sections head-to-tail, following ELK's section links. */
+function orderedSections(sections: ElkSection[]): ElkSection[] {
+  if (sections.length <= 1) return sections;
+  const byId = new Map(sections.map((section) => [section.id, section]));
+  const hasIncoming = new Set(sections.flatMap((section) => section.incomingSections ?? []));
+  const head = sections.find((section) => !hasIncoming.has(section.id));
+  if (head === undefined) return sections;
+  const ordered: ElkSection[] = [];
+  const seen = new Set<string>();
+  let current: ElkSection | undefined = head;
+  while (current !== undefined && !seen.has(current.id)) {
+    ordered.push(current);
+    seen.add(current.id);
+    const nextId: string | undefined = (current.outgoingSections ?? [])[0];
+    current = nextId === undefined ? undefined : byId.get(nextId);
+  }
+  return ordered.length === sections.length ? ordered : sections;
+}
+
+/** Absolute rectangle of every ELK node, keyed by element id. */
+function collectRects(root: ElkResultNode): Map<string, Rect> {
+  const rects = new Map<string, Rect>();
+  const walk = (node: ElkResultNode, originX: number, originY: number): void => {
+    const x = originX + num(node.x);
+    const y = originY + num(node.y);
+    rects.set(node.id, { x, y, width: num(node.width), height: num(node.height) });
+    for (const child of node.children ?? []) walk(child, x, y);
+  };
+  walk(root, 0, 0);
+  return rects;
+}
+
+/** Every edge in every container, paired with its container's absolute origin. */
+function collectEdges(
+  root: ElkResultNode,
+  rects: Map<string, Rect>,
+): Map<string, { edge: NonNullable<ElkResultNode["edges"]>[number]; origin: Rect }> {
+  const edges = new Map<string, { edge: NonNullable<ElkResultNode["edges"]>[number]; origin: Rect }>();
+  const walk = (node: ElkResultNode): void => {
+    const origin = rects.get(node.id) ?? { x: 0, y: 0, width: 0, height: 0 };
+    for (const edge of node.edges ?? []) edges.set(edge.id, { edge, origin });
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(root);
+  return edges;
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+/**
+ * Lay out a coordinate-free diagram script.
+ *
+ * @param input Untrusted, JSON-shaped `DiagramSpec`. Validated before use; see
+ *   `diagram.schema.json` for the accepted shape.
+ * @param measureText Text width for a CSS font string, typically
+ *   `ctx.measureText(text).width` after `ctx.font = font`.
+ * @returns A `Scene` in absolute coordinates. Groups appear parent-before-child;
+ *   nodes and edges keep their input order, and every declared node, edge and
+ *   group appears exactly once.
+ * @throws Error when the script is invalid (bad ids, references, containment
+ *   cycles, enum values, unknown fields, a flow step without a connection) or
+ *   when the engine returns no geometry for a declared element.
+ */
+export async function layoutDiagram(input: unknown, measureText: MeasureText): Promise<Scene> {
+  const diagram = validateDiagram(input);
+  const parentById = new Map<string, string | undefined>(
+    diagram.groups.map((group) => [group.id, group.parent]),
+  );
+  const groupOrder = orderGroups(diagram.groups);
+  const subtree = collectSubtreeNodes(diagram.groups, diagram.nodes);
+
+  const placements = new Map<string, NodePlacement>();
+  for (const node of diagram.nodes) {
+    placements.set(node.id, { node, metrics: measureNode(node, measureText), ports: new Map() });
+  }
+
+  const flowEdges = new Set<string>();
+  for (let index = 1; index < diagram.flow.length; index += 1) {
+    for (const edge of diagram.edges) {
+      if (edge.from === diagram.flow[index - 1] && edge.to === diagram.flow[index]) flowEdges.add(edge.id);
+    }
+  }
+
+  // A group may be laid out in its own run only when no connector crosses the
+  // border of that group *or of any group nested inside it*. ELK inherits
+  // `hierarchyHandling`, so marking a group `SEPARATE_CHILDREN` also makes every
+  // descendant a separate run; a connector that spans one of those borders is
+  // then placed in an ancestor run that cannot see the nested node, and ELK
+  // rejects the graph. Groups without nodes can never be crossed.
+  const descendantIds = (groupId: string): string[] => {
+    const result: string[] = [];
+    const stack = [groupId];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      result.push(current);
+      for (const group of diagram.groups) if (group.parent === current) stack.push(group.id);
+    }
+    return result;
+  };
+  const borderCrossed = new Map<string, boolean>();
+  for (const group of diagram.groups) {
+    const members = subtree.get(group.id) ?? new Set<string>();
+    borderCrossed.set(
+      group.id,
+      diagram.edges.some((edge) => members.has(edge.from) !== members.has(edge.to)),
+    );
+  }
+  const closed = new Map<string, boolean>();
+  for (const group of diagram.groups) {
+    const hasNodes = (subtree.get(group.id)?.size ?? 0) > 0;
+    closed.set(group.id, hasNodes && descendantIds(group.id).every((id) => borderCrossed.get(id) !== true));
+  }
+
+  /**
+   * Direction of the layout run that places a node.
+   *
+   * A node inside a separately laid out group is positioned by that group's run,
+   * so its connectors must follow the group's direction. Otherwise the nearest
+   * ancestor direction applies, which is the root direction by default.
+   */
+  const directionFor = (node: ValidatedNode): Direction => {
+    let current = node.group;
+    while (current !== undefined) {
+      const group = diagram.groups.find((candidate) => candidate.id === current)!;
+      if (closed.get(group.id) === true && group.direction !== undefined) return group.direction;
+      current = group.parent;
+    }
+    return diagram.direction;
+  };
+
+  /**
+   * Direction a group's own content is laid out in.
+   *
+   * A closed group is placed by its own run, so its declared direction applies;
+   * an open group inherits the direction of the enclosing run, which is the
+   * parent group's effective direction or the root direction.
+   */
+  const groupDirection = (group: ValidatedGroup): Direction => {
+    if (closed.get(group.id) === true && group.direction !== undefined) return group.direction;
+    const parent = group.parent === undefined ? undefined : diagram.groups.find((candidate) => candidate.id === group.parent);
+    return parent === undefined ? diagram.direction : groupDirection(parent);
+  };
+
+  // Resolve anchors and label sizes for every connector before building the model.
+  const edgeInputs = diagram.edges.map((edge, index) => {
+    const from = placements.get(edge.from)!;
+    const to = placements.get(edge.to)!;
+    const sides = selectSides(edge, from.node, to.node, directionFor(from.node));
+    for (const [placement, side] of [
+      [from, sides.from],
+      [to, sides.to],
+    ] as const) {
+      if (!placement.ports.has(side)) placement.ports.set(side, `p:${placement.node.id}:${side}`);
+    }
+    const label =
+      edge.label === undefined
+        ? undefined
+        : (() => {
+            const measured = measureTextBlock(edge.label, EDGE_FONT, EDGE_LABEL_WRAP, SUBTITLE_LINE_HEIGHT, measureText);
+            return {
+              text: measured.lines.join("\n"),
+              width: Math.max(1, Math.ceil(measured.width)),
+              height: Math.max(1, Math.ceil(measured.height)),
+            };
+          })();
+    return { elkId: `e:${index}`, edge, from, to, sides, label, onFlow: flowEdges.has(edge.id) };
+  });
+
+  const elkNodes = new Map<string, ElkGraphNode>();
+  for (const group of groupOrder) {
+    elkNodes.set(`g:${group.id}`, {
+      id: `g:${group.id}`,
+      layoutOptions: groupLayoutOptions(
+        groupDirection(group),
+        closed.get(group.id) === true,
+        measureText(group.label, GROUP_FONT),
+      ),
+      children: [],
+    });
+  }
+  for (const placement of placements.values()) {
+    const ports = buildPorts(placement);
+    elkNodes.set(`n:${placement.node.id}`, {
+      id: `n:${placement.node.id}`,
+      width: placement.metrics.width,
+      height: placement.metrics.height,
+      layoutOptions: ports === undefined || ports.length === 0 ? {} : { "elk.portConstraints": "FIXED_POS" },
+      ports,
+    });
+  }
+
+  for (const group of groupOrder) {
+    const element = elkNodes.get(`g:${group.id}`)!;
+    for (const child of groupOrder) {
+      if (child.parent === group.id) (element.children ?? []).push(elkNodes.get(`g:${child.id}`)!);
+    }
+    for (const placement of placements.values()) {
+      if (placement.node.group === group.id) (element.children ?? []).push(elkNodes.get(`n:${placement.node.id}`)!);
+    }
+  }
+
+  const root: ElkGraphNode = {
+    id: "root",
+    layoutOptions: rootLayoutOptions(diagram.direction),
+    children: [],
+  };
+  for (const group of groupOrder) {
+    if (group.parent === undefined) (root.children ?? []).push(elkNodes.get(`g:${group.id}`)!);
+  }
+  for (const placement of placements.values()) {
+    if (placement.node.group === undefined) (root.children ?? []).push(elkNodes.get(`n:${placement.node.id}`)!);
+  }
+
+  for (const entry of edgeInputs) {
+    const container = jointContainer(entry.from.node, entry.to.node, parentById);
+    const host = container === undefined ? root : elkNodes.get(`g:${container}`)!;
+    (host.edges ??= []).push(
+      buildEdge(entry.elkId, entry.edge, entry.from, entry.to, entry.sides, entry.label, entry.onFlow),
+    );
+  }
+
+  const engine = await loadEngine();
+  const laidOut = await engine.layout(root);
+
+  const rects = collectRects(laidOut);
+  const elkEdges = collectEdges(laidOut, rects);
+
+  const sceneGroups: SceneGroup[] = groupOrder.map((group) => {
+    const rect = rects.get(`g:${group.id}`);
+    if (rect === undefined) throw new Error(`Layout engine returned no geometry for group "${group.id}"`);
+    return {
+      id: group.id,
+      parent: group.parent,
+      label: group.label,
+      tone: group.tone,
+      dashed: group.dashed,
+      x: round(rect.x),
+      y: round(rect.y),
+      width: round(rect.width),
+      height: round(rect.height),
+    };
+  });
+
+  const sceneNodes: SceneNode[] = diagram.nodes.map((node) => {
+    const placement = placements.get(node.id)!;
+    const rect = rects.get(`n:${node.id}`);
+    if (rect === undefined) throw new Error(`Layout engine returned no geometry for node "${node.id}"`);
+    const scene: SceneNode = {
+      id: node.id,
+      parent: node.group,
+      shape: placement.metrics.shape,
+      labelLines: placement.metrics.labelLines,
+      subtitleLines: placement.metrics.subtitleLines,
+      x: round(rect.x),
+      y: round(rect.y),
+      width: round(placement.metrics.width),
+      height: round(placement.metrics.height),
+    };
+    if (node.icon !== undefined) scene.icon = node.icon;
+    if (placement.metrics.card !== null) {
+      scene.card = {
+        x: round(scene.x + placement.metrics.card.x),
+        y: round(scene.y + placement.metrics.card.y),
+        width: round(placement.metrics.card.width),
+        height: round(placement.metrics.card.height),
+      };
+    }
+    return scene;
+  });
+
+  const sceneById = new Map(sceneNodes.map((node) => [node.id, node]));
+
+  const sceneEdges: SceneEdge[] = edgeInputs.map((entry) => {
+    const laid = elkEdges.get(entry.elkId);
+    if (laid === undefined) throw new Error(`Layout engine returned no geometry for connector "${entry.edge.id}"`);
+
+    const raw: Point[] = [];
+    for (const section of orderedSections(laid.edge.sections ?? [])) {
+      raw.push({ x: laid.origin.x + section.startPoint.x, y: laid.origin.y + section.startPoint.y });
+      for (const bend of section.bendPoints ?? []) {
+        raw.push({ x: laid.origin.x + bend.x, y: laid.origin.y + bend.y });
+      }
+      raw.push({ x: laid.origin.x + section.endPoint.x, y: laid.origin.y + section.endPoint.y });
+    }
+    if (raw.length < 2) throw new Error(`Layout engine returned an empty route for connector "${entry.edge.id}"`);
+
+    trimToCard(raw, entry.from.metrics, sceneById.get(entry.from.node.id)!, true);
+    trimToCard(raw, entry.to.metrics, sceneById.get(entry.to.node.id)!, false);
+    const points = orthogonalize(raw);
+    if (points.length < 2) {
+      throw new Error(`Connector "${entry.edge.id}" collapsed while routing; check its explicit sides`);
+    }
+
+    const scene: SceneEdge = {
+      id: entry.edge.id,
+      source: entry.edge.from,
+      target: entry.edge.to,
+      kind: entry.edge.kind,
+      points,
+    };
+    if (entry.label !== undefined) {
+      const elkLabel = laid.edge.labels?.[0];
+      if (elkLabel === undefined) {
+        throw new Error(`Layout engine returned no label geometry for connector "${entry.edge.id}"`);
+      }
+      scene.label = {
+        text: entry.label.text,
+        x: round(laid.origin.x + num(elkLabel.x)),
+        y: round(laid.origin.y + num(elkLabel.y)),
+        width: round(entry.label.width),
+        height: round(entry.label.height),
+      };
+    }
+    return scene;
+  });
+
+  // Translate into the positive quadrant. ELK normally starts at its padding,
+  // but a self-loop label can stick out past the origin, so bounds are measured
+  // from the produced geometry rather than assumed.
+  let minX = 0;
+  let minY = 0;
+  let maxX = num(laidOut.width);
+  let maxY = num(laidOut.height);
+  const extend = (x: number, y: number): void => {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+  for (const group of sceneGroups) extend(group.x + group.width, group.y + group.height);
+  for (const node of sceneNodes) extend(node.x + node.width, node.y + node.height);
+  for (const edge of sceneEdges) {
+    for (const point of edge.points) extend(point.x, point.y);
+    if (edge.label !== undefined) extend(edge.label.x + edge.label.width, edge.label.y + edge.label.height);
+  }
+
+  const shiftX = minX < 0 ? round(ROOT_PAD - minX) : 0;
+  const shiftY = minY < 0 ? round(ROOT_PAD - minY) : 0;
+  if (shiftX !== 0 || shiftY !== 0) {
+    for (const group of sceneGroups) {
+      group.x = round(group.x + shiftX);
+      group.y = round(group.y + shiftY);
+    }
+    for (const node of sceneNodes) {
+      node.x = round(node.x + shiftX);
+      node.y = round(node.y + shiftY);
+      if (node.card !== undefined) {
+        node.card.x = round(node.card.x + shiftX);
+        node.card.y = round(node.card.y + shiftY);
+      }
+    }
+    for (const edge of sceneEdges) {
+      for (const point of edge.points) {
+        point.x = round(point.x + shiftX);
+        point.y = round(point.y + shiftY);
+      }
+      if (edge.label !== undefined) {
+        edge.label.x = round(edge.label.x + shiftX);
+        edge.label.y = round(edge.label.y + shiftY);
+      }
+    }
+  }
+
+  return {
+    title: diagram.title,
+    width: round(Math.max(1, maxX + shiftX)),
+    height: round(Math.max(1, maxY + shiftY)),
+    groups: sceneGroups,
+    nodes: sceneNodes,
+    edges: sceneEdges,
+  };
+}

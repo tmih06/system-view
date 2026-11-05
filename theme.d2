@@ -1,0 +1,207 @@
+# Shared design system for svgl-style icon diagrams.
+#
+#   ...@../theme.d2        from diagram/*.d2
+#
+# ── Why a "card" and not a plain icon node ────────────────────────────────
+# A D2 shape renders its icon, then its label. To get an icon on top and a
+# two-tier caption (bold name over a mono sublabel) inside one box, set:
+#
+#   icon.near:  top-center     # icon vocabulary: top-center / center-center
+#   label.near: bottom-center  # label vocabulary: bottom-center / outside-*
+#   label: |md **Name** <blank line> `sub` |
+#
+# Two behaviours of v0.9.0 that this file works around:
+#
+#   * `shape:` must be set explicitly for a markdown label, otherwise the
+#     node's own rect is not painted at all.
+#   * markdown `code` spans get a tinted pill from theme colour N6, so N6 is
+#     overridden to transparent below; the sublabel then reads as plain text.
+#
+# The caption inside a card inherits one font size from the card style; the
+# bold name renders at that size and the code span at 0.85x of it, which is
+# exactly the two-tier look in the reference design.
+
+vars: {
+  d2-config: {
+    layout-engine: tala
+    pad: 48
+    theme-overrides: {
+      # Edge default + accents
+      B1: "#B4BECC"
+      B2: "#7A8697"
+      B3: "#EEF2F7"
+      B4: "#F2F5F9"
+      B5: "#F6F8FB"
+      B6: "#FAFBFD"
+      AA2: "#2563EB"
+      AA4: "#EFF4FD"
+      AA5: "#F5F8FE"
+      AB4: "#F1F5F9"
+      AB5: "#F8FAFC"
+      # Text ramp + surfaces
+      N1: "#16202E"
+      N2: "#7A8697"
+      N3: "#94A3B8"
+      N4: "#CBD5E1"
+      N5: "#E2E8F0"
+      # N6 is the code-span pill; keep it invisible (see note above).
+      N6: "transparent"
+      N7: "#FFFFFF"
+    }
+  }
+}
+
+classes: {
+  # ── Card: icon + name + mono sublabel ────────────────────────────────
+  card: {
+    shape: rectangle
+    width: 116
+    height: 132
+    icon.near: top-center
+    label.near: bottom-center
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#E4E8EE"
+      stroke-width: 1
+      border-radius: 22
+      font-size: 12
+    }
+  }
+  card-small: {
+    shape: rectangle
+    width: 92
+    height: 108
+    icon.near: top-center
+    label.near: bottom-center
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#E4E8EE"
+      stroke-width: 1
+      border-radius: 20
+      font-size: 11
+    }
+  }
+
+  # ── Tile: card + caption *below* it, no label box ────────────────────
+  # The reference design puts the caption outside the card. A 3-row grid of
+  # transparent rows achieves that: [icon card, bold name, mono sublabel].
+  # Connect tile-to-tile (`web -> api`): edges then leave from the card's
+  # edge. Anchoring on `<tile>.ic` instead makes them cut across the caption.
+  tile: {
+    label: ""
+    grid-rows: 3
+    grid-gap: 2
+    style: {fill: transparent; stroke: transparent; stroke-width: 0}
+  }
+  tile-icon: {
+    shape: rectangle
+    width: 104
+    height: 104
+    icon.near: center-center
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#E4E8EE"
+      stroke-width: 1
+      border-radius: 22
+    }
+  }
+  tile-name: {
+    width: 132
+    height: 20
+    label.near: center-center
+    style: {
+      fill: transparent
+      stroke: transparent
+      stroke-width: 0
+      font-size: 13
+      bold: true
+      font-color: "#16202E"
+    }
+  }
+  tile-sub: {
+    width: 132
+    height: 15
+    label.near: center-center
+    style: {
+      fill: transparent
+      stroke: transparent
+      stroke-width: 0
+      font: mono
+      font-size: 10
+      font-color: "#7A8697"
+    }
+  }
+
+  # ── Panels ───────────────────────────────────────────────────────────
+  # Warm tint: vendor-managed / third-party service.
+  panel: {
+    label.near: top-left
+    style: {
+      fill: "#FDF8F3"
+      stroke: "#E8C6A0"
+      stroke-width: 1
+      border-radius: 20
+      font-size: 13
+      bold: true
+      font-color: "#9A6634"
+    }
+  }
+  # Cool dashed tint: your own boundary / floating network.
+  boundary: {
+    label.near: top-left
+    style: {
+      fill: "#F7FAFE"
+      stroke: "#C3D5EC"
+      stroke-width: 1
+      stroke-dash: 4
+      border-radius: 20
+      font-size: 13
+      bold: true
+      font-color: "#5C7CA6"
+    }
+  }
+  # Untinted grouping: a slice of a larger flow, no chrome but a label.
+  cluster: {
+    label.near: top-left
+    style: {
+      fill: transparent
+      stroke: transparent
+      stroke-width: 0
+      font-size: 12
+      bold: true
+      font-color: "#94A3B8"
+    }
+  }
+
+  # ── Edges ────────────────────────────────────────────────────────────
+  edge: {
+    style: {
+      stroke: "#B4BECC"
+      stroke-width: 1
+      font-size: 10
+      font-color: "#7A8697"
+      italic: false
+      border-radius: 8
+    }
+  }
+  edge-accent: {
+    style: {
+      stroke: "#2563EB"
+      stroke-width: 1
+      font-size: 10
+      font-color: "#2563EB"
+      italic: false
+      border-radius: 8
+    }
+  }
+  edge-dashed: {
+    style: {
+      stroke: "#C2CBD6"
+      stroke-width: 1
+      stroke-dash: 3
+      font-size: 10
+      font-color: "#7A8697"
+      italic: false
+    }
+  }
+}

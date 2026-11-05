@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.wrangler/
+.build/
+icons/.svgl.json
+*.tsbuildinfo
+.DS_Store

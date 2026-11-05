@@ -1,0 +1,84 @@
+# Demo: icon-tile architecture diagram in the svgl design language.
+#
+#   ./scripts/build.sh demo       # -> out/demo.svg, out/demo.png
+#
+# Every node is a `tile` from theme.d2: an icon card with a bold name and a
+# mono sublabel underneath, exactly as in the reference layout. Panels tint by
+# ownership: warm = third-party, dashed blue = your own boundary.
+
+...@../theme.d2
+direction: right
+
+# ── Your own application (dashed = your boundary) ────────────────────────
+app: Dokploy {
+  class: boundary
+  grid-columns: 2
+  grid-gap: 96
+
+  web: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/nextjs.svg}
+    nm: Web {class: tile-name}
+    sb: Next.js {class: tile-sub}
+  }
+  api: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/hono.svg}
+    nm: API {class: tile-name}
+    sb: Hono {class: tile-sub}
+  }
+  pg: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/postgresql.svg}
+    nm: Postgres {class: tile-name}
+    sb: primary {class: tile-sub}
+  }
+  ts: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/typesense.svg}
+    nm: Search {class: tile-name}
+    sb: Typesense {class: tile-sub}
+  }
+
+  web -> api: RPC {class: edge}
+  api -> pg: SQL {class: edge}
+  api -> ts: index {class: edge-dashed}
+}
+
+# ── Third-party edge platform (warm = vendor managed) ────────────────────
+edge: Cloudflare {
+  class: panel
+  grid-columns: 2
+  grid-gap: 96
+
+  worker: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/cloudflare-workers.svg}
+    nm: Worker {class: tile-name}
+    sb: edge runtime {class: tile-sub}
+  }
+  mail: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/resend.svg}
+    nm: Email {class: tile-name}
+    sb: Resend {class: tile-sub}
+  }
+  db: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/cloudflare.svg}
+    nm: D1 {class: tile-name}
+    sb: SQLite {class: tile-sub}
+  }
+  cache: {
+    class: tile
+    ic: "" {class: tile-icon; icon: ../icons/redis.svg}
+    nm: KV {class: tile-name}
+    sb: Redis {class: tile-sub}
+  }
+
+  worker -> db: write {class: edge}
+  worker -> mail: send {class: edge-dashed}
+  worker -> cache: read {class: edge}
+}
+
+app.web -> edge.worker: HTTPS {class: edge-accent}

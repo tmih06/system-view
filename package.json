@@ -1,0 +1,36 @@
+{
+  "name": "d2-rich-icons",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Coordinate-free diagrams for agents, with SVG and editable draw.io output",
+  "scripts": {
+    "dev": "bun --hot src/server.ts",
+    "preview": "wrangler pages dev dist",
+    "build": "bun scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
+    "codemirror": "^6.0.2",
+    "elkjs": "0.11.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.158.0"
+  }
+}

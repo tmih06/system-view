@@ -1,0 +1,503 @@
+{
+  "title": "Festival architecture",
+  "direction": "right",
+  "groups": [
+    {
+      "id": "cf",
+      "label": "Cloudflare",
+      "tone": "warm",
+      "dashed": false
+    },
+    {
+      "id": "dok",
+      "label": "Dokploy Server",
+      "tone": "cool",
+      "dashed": false
+    },
+    {
+      "id": "dok.invsys",
+      "label": "Inventory System (SANGISAICF)",
+      "tone": "cool",
+      "dashed": true,
+      "parent": "dok"
+    },
+    {
+      "id": "dok.pub",
+      "label": "Festival Web (sangifes)",
+      "tone": "cool",
+      "dashed": true,
+      "parent": "dok"
+    },
+    {
+      "id": "ext",
+      "label": "External Services",
+      "tone": "neutral",
+      "dashed": false
+    },
+    {
+      "id": "backup",
+      "label": "Backup Server (inside WireGuard)",
+      "tone": "neutral",
+      "dashed": true
+    },
+    {
+      "id": "ci",
+      "label": "Separate PC (CI)",
+      "tone": "neutral",
+      "dashed": true
+    },
+    {
+      "id": "offline",
+      "label": "Photo Capture (offline)",
+      "tone": "neutral",
+      "dashed": true
+    }
+  ],
+  "nodes": [
+    {
+      "id": "clients.web",
+      "label": "Visitors",
+      "subtitle": "browser",
+      "shape": "terminal"
+    },
+    {
+      "id": "clients.pwa",
+      "label": "Organizers / Exhibitors",
+      "subtitle": "browser",
+      "shape": "terminal"
+    },
+    {
+      "id": "clients.android",
+      "label": "Inventory Staff",
+      "subtitle": "FZ-N1 Android",
+      "icon": "android"
+    },
+    {
+      "id": "cf.status",
+      "label": "Status",
+      "subtitle": "Worker + DO",
+      "icon": "cloudflare-workers",
+      "group": "cf"
+    },
+    {
+      "id": "cf.pages",
+      "label": "Pages",
+      "subtitle": "2026 archive",
+      "icon": "cloudflare",
+      "group": "cf"
+    },
+    {
+      "id": "cf.bingo",
+      "label": "Bingo",
+      "subtitle": "number draw / card check",
+      "icon": "cloudflare-workers",
+      "group": "cf"
+    },
+    {
+      "id": "cf.dns",
+      "label": "DNS / Proxy",
+      "subtitle": "WAF / Access",
+      "icon": "cloudflare",
+      "group": "cf"
+    },
+    {
+      "id": "cf.stamps",
+      "label": "Stamp Rally AR",
+      "subtitle": "stamp / Worker + D1",
+      "icon": "cloudflare-workers",
+      "group": "cf"
+    },
+    {
+      "id": "cf.mail",
+      "label": "Email Service",
+      "subtitle": "mail delivery",
+      "icon": "cloudflare",
+      "group": "cf"
+    },
+    {
+      "id": "cf.turnstile",
+      "label": "Turnstile",
+      "subtitle": "bot protection",
+      "icon": "cloudflare",
+      "group": "cf"
+    },
+    {
+      "id": "cf.r2",
+      "label": "R2",
+      "subtitle": "backup storage",
+      "icon": "cloudflare",
+      "group": "cf"
+    },
+    {
+      "id": "cf.bak",
+      "label": "Backup",
+      "subtitle": "Worker",
+      "icon": "cloudflare-workers",
+      "group": "cf"
+    },
+    {
+      "id": "dok.dokploy",
+      "label": "Dokploy",
+      "subtitle": "Traefik / auto-deploy",
+      "icon": "dokploy",
+      "group": "dok"
+    },
+    {
+      "id": "dok.invsys.inv",
+      "label": "Inventory",
+      "subtitle": "item / Nuxt",
+      "icon": "nuxt",
+      "group": "dok.invsys"
+    },
+    {
+      "id": "dok.invsys.invdb",
+      "label": "SQLite",
+      "subtitle": "items / loans",
+      "icon": "sqlite",
+      "group": "dok.invsys"
+    },
+    {
+      "id": "dok.invsys.invcache",
+      "label": "Redis",
+      "subtitle": "locks / real-time",
+      "icon": "redis",
+      "group": "dok.invsys"
+    },
+    {
+      "id": "dok.pub.site",
+      "label": "Public Site",
+      "subtitle": "sangifes.com / Nuxt",
+      "icon": "nuxt",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.pub.apigw",
+      "label": "API",
+      "subtitle": "api / Nitro",
+      "icon": "nuxt",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.tickets",
+      "label": "Tickets",
+      "subtitle": "ticket / Hono ×2",
+      "icon": "hono",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.tkdb",
+      "label": "PostgreSQL",
+      "subtitle": "ticket-db",
+      "icon": "postgresql",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.portal",
+      "label": "Student / Committee",
+      "subtitle": "student / Nuxt UI",
+      "icon": "nuxt",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.pdb",
+      "label": "PostgreSQL",
+      "subtitle": "api-db",
+      "icon": "postgresql",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.pss",
+      "label": "Redis",
+      "subtitle": "sessions / notifications",
+      "icon": "redis",
+      "group": "dok.pub"
+    },
+    {
+      "id": "dok.garage",
+      "label": "Garage",
+      "subtitle": "images / files",
+      "icon": "garage",
+      "group": "dok.pub"
+    },
+    {
+      "id": "ext.gh",
+      "label": "GitHub",
+      "subtitle": "repository / CI",
+      "icon": "github",
+      "group": "ext"
+    },
+    {
+      "id": "ext.google",
+      "label": "Google",
+      "subtitle": "login (OAuth)",
+      "icon": "google",
+      "group": "ext"
+    },
+    {
+      "id": "ext.discord",
+      "label": "Discord",
+      "subtitle": "incident alerts",
+      "icon": "discord",
+      "group": "ext"
+    },
+    {
+      "id": "ext.flux",
+      "label": "ImageFlux",
+      "subtitle": "image processing / CDN",
+      "icon": "image",
+      "group": "ext"
+    },
+    {
+      "id": "ext.ga",
+      "label": "Google Analytics",
+      "subtitle": "access analytics",
+      "icon": "google-analytics",
+      "group": "ext"
+    },
+    {
+      "id": "backup.wg",
+      "label": "WireGuard",
+      "subtitle": "VPN tunnel",
+      "icon": "wireguard",
+      "group": "backup"
+    },
+    {
+      "id": "backup.rustfs",
+      "label": "RustFS",
+      "subtitle": "S3 / latest 3 versions",
+      "icon": "rustfs",
+      "group": "backup"
+    },
+    {
+      "id": "ci.runner",
+      "label": "Actions Runner",
+      "subtitle": "self-hosted ×3",
+      "icon": "github-actions",
+      "group": "ci"
+    },
+    {
+      "id": "offline.card",
+      "label": "SD Card",
+      "subtitle": "capture media",
+      "icon": "hard-drive",
+      "group": "offline"
+    },
+    {
+      "id": "offline.mgr",
+      "label": "SD Backup Manager",
+      "subtitle": "PC app / Rust",
+      "icon": "rust",
+      "group": "offline"
+    },
+    {
+      "id": "offline.nas",
+      "label": "NAS",
+      "subtitle": "capture storage",
+      "icon": "server",
+      "group": "offline"
+    }
+  ],
+  "edges": [
+    {
+      "id": "visitors-dns",
+      "from": "clients.web",
+      "to": "cf.dns",
+      "label": "HTTPS",
+      "kind": "primary"
+    },
+    {
+      "id": "organizers-dns",
+      "from": "clients.pwa",
+      "to": "cf.dns",
+      "kind": "primary"
+    },
+    {
+      "id": "inventory-dns",
+      "from": "clients.android",
+      "to": "cf.dns",
+      "kind": "primary"
+    },
+    {
+      "id": "dns-dokploy",
+      "from": "cf.dns",
+      "to": "dok.dokploy",
+      "label": "HTTPS",
+      "kind": "primary"
+    },
+    {
+      "id": "dns-pages",
+      "from": "cf.dns",
+      "to": "cf.pages"
+    },
+    {
+      "id": "dns-bingo",
+      "from": "cf.dns",
+      "to": "cf.bingo"
+    },
+    {
+      "id": "dns-stamps",
+      "from": "cf.dns",
+      "to": "cf.stamps"
+    },
+    {
+      "id": "status-dns",
+      "from": "cf.status",
+      "to": "cf.dns",
+      "label": "External monitoring",
+      "kind": "async"
+    },
+    {
+      "id": "dokploy-inventory",
+      "from": "dok.dokploy",
+      "to": "dok.invsys.inv"
+    },
+    {
+      "id": "dokploy-site",
+      "from": "dok.dokploy",
+      "to": "dok.pub.site",
+      "kind": "primary"
+    },
+    {
+      "id": "dokploy-api",
+      "from": "dok.dokploy",
+      "to": "dok.pub.apigw",
+      "kind": "primary"
+    },
+    {
+      "id": "dokploy-portal",
+      "from": "dok.dokploy",
+      "to": "dok.portal"
+    },
+    {
+      "id": "inventory-sqlite",
+      "from": "dok.invsys.inv",
+      "to": "dok.invsys.invdb"
+    },
+    {
+      "id": "inventory-redis",
+      "from": "dok.invsys.inv",
+      "to": "dok.invsys.invcache"
+    },
+    {
+      "id": "site-api",
+      "from": "dok.pub.site",
+      "to": "dok.pub.apigw",
+      "label": "/api",
+      "kind": "primary"
+    },
+    {
+      "id": "api-tickets",
+      "from": "dok.pub.apigw",
+      "to": "dok.tickets"
+    },
+    {
+      "id": "tickets-db",
+      "from": "dok.tickets",
+      "to": "dok.tkdb"
+    },
+    {
+      "id": "portal-api",
+      "from": "dok.portal",
+      "to": "dok.pub.apigw"
+    },
+    {
+      "id": "api-db",
+      "from": "dok.pub.apigw",
+      "to": "dok.pdb"
+    },
+    {
+      "id": "tickets-redis",
+      "from": "dok.tickets",
+      "to": "dok.pss"
+    },
+    {
+      "id": "api-garage",
+      "from": "dok.pub.apigw",
+      "to": "dok.garage",
+      "label": "S3"
+    },
+    {
+      "id": "api-mail",
+      "from": "dok.pub.apigw",
+      "to": "cf.mail",
+      "label": "Mail delivery"
+    },
+    {
+      "id": "api-turnstile",
+      "from": "dok.pub.apigw",
+      "to": "cf.turnstile",
+      "label": "Verification"
+    },
+    {
+      "id": "api-google",
+      "from": "dok.pub.apigw",
+      "to": "ext.google",
+      "label": "OAuth / notifications"
+    },
+    {
+      "id": "api-discord",
+      "from": "dok.pub.apigw",
+      "to": "ext.discord"
+    },
+    {
+      "id": "imageflux-api",
+      "from": "ext.flux",
+      "to": "dok.pub.apigw",
+      "label": "Image fetch"
+    },
+    {
+      "id": "dokploy-backup",
+      "from": "dok.dokploy",
+      "to": "cf.bak",
+      "label": "DB backup"
+    },
+    {
+      "id": "dokploy-wireguard",
+      "from": "dok.dokploy",
+      "to": "backup.wg",
+      "label": "Hourly backup"
+    },
+    {
+      "id": "backup-r2",
+      "from": "cf.bak",
+      "to": "cf.r2"
+    },
+    {
+      "id": "wireguard-rustfs",
+      "from": "backup.wg",
+      "to": "backup.rustfs"
+    },
+    {
+      "id": "github-dokploy",
+      "from": "ext.gh",
+      "to": "dok.dokploy",
+      "label": "push → auto-deploy",
+      "kind": "async"
+    },
+    {
+      "id": "github-runner",
+      "from": "ext.gh",
+      "to": "ci.runner",
+      "label": "CI",
+      "kind": "async"
+    },
+    {
+      "id": "sd-manager",
+      "from": "offline.card",
+      "to": "offline.mgr"
+    },
+    {
+      "id": "manager-nas",
+      "from": "offline.mgr",
+      "to": "offline.nas",
+      "label": "SMB"
+    }
+  ],
+  "flow": [
+    "cf.dns",
+    "dok.dokploy",
+    "dok.pub.apigw",
+    "dok.tickets",
+    "dok.tkdb"
+  ]
+}

@@ -60,12 +60,14 @@ export function Whiteboard({ scene, svg, dark, onToggleTheme }: Props) {
         }
         moveCamera(next);
       } else {
-        const decay = Math.exp(-dt / 260);
-        const distance = 260 * (1 - decay);
+        // Coast distance is velocity × this constant (≈120ms of travel), so a
+        // full-speed flick lands ~240px away instead of sailing past the target.
+        const decay = Math.exp(-dt / 120);
+        const distance = 120 * (1 - decay);
         moveCamera({ ...old, x: old.x + velocity.current.x * distance, y: old.y + velocity.current.y * distance });
         velocity.current.x *= decay;
         velocity.current.y *= decay;
-        if (Math.hypot(velocity.current.x, velocity.current.y) < 0.015) return;
+        if (Math.hypot(velocity.current.x, velocity.current.y) < 0.05) return;
       }
       frame.current = requestAnimationFrame(tick);
     };
@@ -167,9 +169,9 @@ export function Whiteboard({ scene, svg, dark, onToggleTheme }: Props) {
         const start = drag.current;
         if (!start) return;
         const dt = Math.max(1, event.timeStamp - start.time);
-        // Filter pointer-event noise and cap launch speed at 3 CSS pixels/ms.
-        start.vx = Math.max(-3, Math.min(3, 0.6 * (event.clientX - start.lastX) / dt + 0.4 * start.vx));
-        start.vy = Math.max(-3, Math.min(3, 0.6 * (event.clientY - start.lastY) / dt + 0.4 * start.vy));
+        // Filter pointer-event noise and cap launch speed at 2 CSS pixels/ms.
+        start.vx = Math.max(-2, Math.min(2, 0.6 * (event.clientX - start.lastX) / dt + 0.4 * start.vx));
+        start.vy = Math.max(-2, Math.min(2, 0.6 * (event.clientY - start.lastY) / dt + 0.4 * start.vy));
         start.lastX = event.clientX;
         start.lastY = event.clientY;
         start.time = event.timeStamp;
@@ -183,7 +185,7 @@ export function Whiteboard({ scene, svg, dark, onToggleTheme }: Props) {
         if (!start || reducedMotion.current || event.timeStamp - start.time > 80) return;
         velocity.current.x = start.vx;
         velocity.current.y = start.vy;
-        if (Math.hypot(start.vx, start.vy) >= 0.015) animate();
+        if (Math.hypot(start.vx, start.vy) >= 0.05) animate();
       }}
       onPointerCancel={() => { drag.current = null; setDragging(false); stopMotion(); }}
       onLostPointerCapture={() => {

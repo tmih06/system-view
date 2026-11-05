@@ -37,6 +37,19 @@ html, body, #root { width: 100%; height: 100%; margin: 0; }
   width: 1px;
   background: #e1e4e8;
 }
+.panel-divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 4px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: #b7bec8;
+}
+.panel-divider:hover::after, .panel-divider:focus-visible::after,
+.workspace.is-resizing .panel-divider::after { background: #8792a1; }
 .panel-divider:hover::before, .panel-divider:focus-visible::before { background: #aab2bd; }
 .panel-divider:focus-visible { outline: none; }
 .workspace.is-resizing { cursor: col-resize; user-select: none; }

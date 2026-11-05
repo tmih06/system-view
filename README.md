@@ -21,8 +21,8 @@ next port when one is occupied. `PORT=3007 bun run dev` changes the starting por
 and only in development; production startup errors are not retried.
 
 - Two full-height panels, initially split equally: script left, diagram right.
-  Drag the divider to resize; drag it to the left edge to collapse the script,
-  then drag that edge back to reopen. Double-click the divider to restore 50/50.
+  Drag the divider's centered pill to resize; drag it to the left edge to collapse
+  the script, then drag the pill back to reopen. Double-click to restore 50/50.
   The focused divider also supports arrow keys, Home (collapse), and End (expand).
 - No header, toolbars, example picker, status bars, footer, or export menu.
 - Layout updates after editing; **Ctrl/Cmd + Enter** runs it again.

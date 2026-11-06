@@ -95,8 +95,12 @@ The user-facing layout contract is documented in `README.md`.
 
 Placement finishes before wiring begins: moving a panel after routing would
 detach its endpoints. `flow` supplies the main reading axis; a rail lets a direct
-member share that axis with a card inside a nested panel. Grid cells have one
-canvas-wide pitch, but nested panels retain their individual extents.
+member share that axis with a card inside a nested panel. Grid cells share a base
+footprint, but nested panels retain their individual extents.
+Request rows align visible side-port centres, not node tops. Placement receives
+the measured icon-centre offset; body shapes use their emitted rectangle centre.
+Mixed rows reserve extra vertical clearance so centring never consumes caption
+space or moves a footprint outside its panel.
 Peer headings align beside the first nested section. Flow alignment opens a band
 inside a leaf panel rather than pushing that whole panel down to a nested entry.
 Peripheral columns align their median connected row; small primary-input rails

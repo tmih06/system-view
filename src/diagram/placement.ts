@@ -15,9 +15,9 @@ import type { Direction, EdgeKind, Point, Rect } from "./types";
  *
  * The shape of the result:
  *
- * - A leaf panel (cards only) is a uniform grid. Every cell takes the largest
- *   measured card on the canvas, so all panels share one pitch and read as one
- *   table; cards sit at the cell's top-left so lanes share a baseline.
+ * - Leaf panels use a shared measured footprint and column pitch. Mixed shapes
+ *   align their visible side ports within each row, reserving extra vertical
+ *   clearance where their centres differ.
  * - A panel carrying flow cards reserves an unobstructed lane for them.
  *   Spare columns hold frontend inputs beside rather than in the flow column.
  * - A panel holding both direct cards and nested panels uses a narrow card rail
@@ -54,6 +54,11 @@ export interface PlacementNode {
   /** Measured footprint width; a card may be widened to its grid cell. */
   width: number;
   height: number;
+  /**
+   * Visible side-port height relative to the origin. Omitted body shapes use
+   * half their emitted height, including any grid-cell expansion.
+   */
+  portY?: number;
   /** Declaration position among all nodes; the member reading order. */
   order: number;
 }
@@ -296,10 +301,9 @@ function labelMinWidth(group: PlacementGroup): number {
 /**
  * Uniform grid for a panel that holds cards only.
  *
- * Every cell is the canvas card cell, so the panel reads as part of one table.
- * Cards occupy the cell's top-left, which keeps the first lane of every panel on
- * the same line — the property the canvas relies on when it aligns flow members
- * across panels.
+ * The common footprint fixes column pitch. Mixed body/service rows reserve
+ * additional height to align visible side-port centres without consuming caption
+ * clearance. Reverse cell order before applying those shape-specific offsets.
  */
 function gridLayout(
   members: readonly PlacementNode[],
@@ -316,15 +320,23 @@ function gridLayout(
   }
   const grid = gridCells(members, flowIndex, edges, columns, horizontalFlow);
   const innerWidth = grid.columns * cell.width + (grid.columns - 1) * CELL_GAP;
-  const innerHeight = grid.rows * cell.height + (grid.rows - 1) * CELL_GAP;
+  let minPort = Infinity;
+  let maxPort = 0;
+  for (const node of members) {
+    const port = node.portY ?? cell.height / 2;
+    minPort = Math.min(minPort, port);
+    maxPort = Math.max(maxPort, port);
+  }
+  const rowHeight = cell.height + maxPort - minPort;
+  const innerHeight = grid.rows * rowHeight + (grid.rows - 1) * CELL_GAP;
   const areas: Area[] = grid.cells.map((entry) => ({
     key: `n:${entry.node.id}`,
-    x: PAD_SIDE + entry.column * (cell.width + CELL_GAP),
-    y: PAD_TOP + entry.row * (cell.height + CELL_GAP),
+    x: PAD_SIDE + (direction === "left" ? grid.columns - 1 - entry.column : entry.column) * (cell.width + CELL_GAP),
+    y: PAD_TOP + (direction === "up" ? grid.rows - 1 - entry.row : entry.row) * (rowHeight + CELL_GAP) +
+      maxPort - (entry.node.portY ?? cell.height / 2),
     width: cell.width,
     height: cell.height,
   }));
-  mirrorAreas(areas, innerWidth, innerHeight, direction);
   return {
     width: Math.max(PAD_SIDE * 2 + innerWidth, minimumWidth),
     height: PAD_TOP + innerHeight + PAD_BOTTOM,
@@ -419,7 +431,7 @@ function mixedLayout(
   const railWidth = context.cell.width;
 
   /**
-   * Stack card this rail card should line up with.
+   * Rail origin aligned with the chosen stack card's visible port centre.
    *
    * The next canvas-flow member inside the stack wins, because that is the line a
    * reader follows: a request enters the panel at its rail card and continues
@@ -437,7 +449,11 @@ function mixedLayout(
       const score = here !== undefined && ahead !== undefined && ahead > here ? ahead : Number.MAX_SAFE_INTEGER;
       const kind = kindRank(edge.kind);
       if (best === undefined || score < best.score || (score === best.score && kind < best.kind)) {
-        best = { inner, score, kind };
+        const port = portCenter(context.nodeById.get(other)!, inner);
+        best = {
+          inner: { ...inner, x: port.x - context.cell.width / 2, y: port.y - (card.portY ?? context.cell.height / 2) },
+          score, kind,
+        };
       }
     }
     return best?.inner;
@@ -502,12 +518,9 @@ function mixedLayout(
 /**
  * One card cell for the whole canvas.
  *
- * Every grid cell in the composition takes the largest measured card, so cards
- * line up on a single pitch across panels instead of each panel inventing its
- * own. A shared pitch is what makes two panels read as one table, and it is why
- * the reference shows identical boxes everywhere; the caller recentres an icon
- * inside the widened card. The cell never shrinks below a card's own measured
- * footprint, so no caption is clipped.
+ * The largest measured footprint defines the base cell so no caption is clipped.
+ * The caller recentres each icon horizontally in a widened cell; mixed-shape
+ * grids may increase their row pitch to align visible side ports.
  */
 function commonCell(nodes: readonly PlacementNode[]): { width: number; height: number } {
   let width = 1;
@@ -732,6 +745,14 @@ function flowHorizontal(direction: Direction): boolean {
 }
 
 /**
+ * Visible side-port centre in the same coordinate system as rect. Service
+ * captions are not the attachment surface; widened cells recenter cards in x.
+ */
+function portCenter(node: PlacementNode, rect: Rect): Point {
+  return { x: rect.x + rect.width / 2, y: rect.y + (node.portY ?? rect.height / 2) };
+}
+
+/**
  * Open a routing band before an aligned entry without moving the heading or
  * earlier rows. Increasing only the trailing extent preserves containment.
  */
@@ -747,24 +768,25 @@ function insertBand(layout: PanelLayout, item: CanvasItem, horizontal: boolean, 
 /**
  * Align the request path without letting a deep nested entry drag every peer
  * panel down the canvas. Leaf panels gain a routing band before their entry;
- * preceding cards and headings keep their alignment. Compound panels retain
- * their measured interiors and translate only when necessary.
+ * preceding cards and headings keep their alignment. Match visible port centres,
+ * not footprint origins: a terminal and an icon can have different heights.
+ * Compound panels retain their measured interiors and translate if needed.
  */
 function alignFlow(context: Context, placed: PlacedItem[], direction: Direction): void {
   const horizontal = flowHorizontal(direction);
-  const anchors: Array<{ item: PlacedItem; rect: Rect }> = [];
+  const anchors: Array<{ item: PlacedItem; rect: Rect; port: Point }> = [];
   const flowIds = [...context.flowIndex.keys()];
   for (const item of placed) {
     const members = memberIds(context, item.key);
     const id = flowIds.find(id => members.has(id));
     if (id === undefined) continue;
     const rect = nodeRect(context, item, id)!;
-    anchors.push({ item, rect });
+    anchors.push({ item, rect, port: portCenter(context.nodeById.get(id)!, rect) });
   }
   if (anchors.length === 0) return;
-  const target = Math.max(...anchors.map(anchor => horizontal ? anchor.rect.y : anchor.rect.x));
-  for (const { item, rect } of anchors) {
-    const delta = target - (horizontal ? rect.y : rect.x);
+  const target = Math.max(...anchors.map(anchor => horizontal ? anchor.port.y : anchor.port.x));
+  for (const { item, rect, port } of anchors) {
+    const delta = target - (horizontal ? port.y : port.x);
     const layout = item.key.startsWith("g:") ? context.layouts.get(item.key.slice(2)) : undefined;
     if (layout !== undefined && layout.areas.every(area => area.key.startsWith("n:"))) {
       const threshold = horizontal ? rect.y - item.y : rect.x - item.x;
@@ -779,13 +801,16 @@ function alignFlow(context: Context, placed: PlacedItem[], direction: Direction)
     if (carriesFlow(context, item.key)) continue;
     const ingress = inside.size <= 3;
     const offsets = new Set<number>();
+    let threshold = Infinity;
     for (const edge of context.edges) {
       if (ingress ? edge.kind !== "primary" : edge.kind === "async") continue;
       const id = inside.has(edge.from) ? edge.from : inside.has(edge.to) ? edge.to : undefined;
       const other = id === edge.from ? edge.to : edge.from;
       if (id === undefined || !context.flowIndex.has(other)) continue;
       const rect = nodeRect(context, item, id)!;
-      offsets.add(horizontal ? rect.y - item.y : rect.x - item.x);
+      threshold = Math.min(threshold, horizontal ? rect.y - item.y : rect.x - item.x);
+      const port = portCenter(context.nodeById.get(id)!, rect);
+      offsets.add(horizontal ? port.y - item.y : port.x - item.x);
     }
     if (offsets.size === 0) continue;
     const sorted = [...offsets].sort((a, b) => a - b);
@@ -797,7 +822,7 @@ function alignFlow(context: Context, placed: PlacedItem[], direction: Direction)
       const layout = item.key.startsWith("g:") ? context.layouts.get(item.key.slice(2)) : undefined;
       const delta = target - (horizontal ? item.y : item.x) - sorted[Math.floor(sorted.length / 2)];
       if (delta > 0 && layout !== undefined && layout.areas.every(area => area.key.startsWith("n:"))) {
-        insertBand(layout, item.item, horizontal, sorted[0], delta);
+        insertBand(layout, item.item, horizontal, threshold, delta);
       }
     }
   }

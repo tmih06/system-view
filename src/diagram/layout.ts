@@ -1578,7 +1578,10 @@ function layoutComposed(
     groupOrder.map(group => ({ ...group, labelWidth: measureText(group.label, GROUP_FONT) })),
     diagram.nodes.map(node => {
       const metrics = placements.get(node.id)!.metrics;
-      return { id: node.id, group: node.group, width: metrics.width, height: metrics.height, order: node.order };
+      return {
+        id: node.id, group: node.group, width: metrics.width, height: metrics.height, order: node.order,
+        portY: metrics.card === null ? undefined : metrics.card.y + metrics.card.height / 2,
+      };
     }),
     diagram.edges,
     diagram.flow,

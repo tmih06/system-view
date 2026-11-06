@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { layoutDiagram } from "../src/diagram/layout";
 import { theme } from "../src/diagram/theme";
+import { examples } from "../web/examples";
 import type {
   DiagramSpec,
   MeasureText,
@@ -201,6 +202,44 @@ describe("layoutDiagram: composed panels align their icon columns", () => {
 });
 
 describe("layoutDiagram: composed connectors meet the visible icon", () => {
+  test("keeps the Web platform HTTPS flow straight across terminal and service shapes", async () => {
+    const scene = await layoutDiagram(examples[1].spec, measure);
+    const edge = scene.edges.find(edge => edge.source === "visitors" && edge.target === "dns")!;
+    const from = nodeById(scene, "visitors");
+    const to = nodeById(scene, "dns").card!;
+    expectNear(from.y + from.height / 2, to.y + to.height / 2, "visible port centres");
+    expect(edge.points).toHaveLength(2);
+    expectNear(edge.points[0].y, from.y + from.height / 2, "terminal side centre");
+    expectNear(edge.points[1].y, to.y + to.height / 2, "service side centre");
+  });
+
+  test("aligns mixed-shape side ports within a panel in either horizontal direction", async () => {
+    for (const direction of ["right", "left"] as const) {
+      const scene = await layoutDiagram(spec({
+        direction,
+        groups: [
+          { id: "row", label: "Request", direction, columns: 2 },
+          { id: "other", label: "Unrelated" },
+        ],
+        nodes: [
+          { id: "caller", label: "Visitors", subtitle: "browser", shape: "terminal", group: "row" },
+          { id: "callee", label: "DNS", subtitle: "proxy", icon: "cloudflare", group: "row" },
+        ],
+        edges: [{ id: "https", from: "caller", to: "callee", kind: "primary" }],
+        flow: ["caller", "callee"],
+      }), measure);
+      const from = nodeById(scene, "caller");
+      const to = nodeById(scene, "callee").card!;
+      expectNear(from.y + from.height / 2, to.y + to.height / 2, `${direction} port centres`);
+      expect(edgeById(scene, "https").points).toHaveLength(2);
+      const parent = scene.groups.find(group => group.id === "row")!;
+      for (const node of scene.nodes) {
+        expect(node.y).toBeGreaterThanOrEqual(parent.y);
+        expect(node.y + node.height).toBeLessThanOrEqual(parent.y + parent.height);
+      }
+    }
+  });
+
   test("a horizontal connector inside a panel attaches to the icon card sides, not the caption box", async () => {
     const scene = await layoutDiagram(
       spec({

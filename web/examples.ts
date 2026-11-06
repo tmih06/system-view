@@ -52,12 +52,15 @@ const request: DiagramSpec = {
 };
 
 export const examples = [
-  // Manual mode reproduces the traced reference exactly: same panels, card
-  // positions and connector bends as out/club-editable.svg.
-  { id: "club", name: "Club architecture", description: "Traced · 35 nodes · manual layout", spec: clubManual as DiagramSpec },
+  // The workspace opens here. It is the same 35-node topology as the traced
+  // reference, but with no coordinates at all: the first thing a reader sees is
+  // what the tool actually does, not a hand-placed file.
+  { id: "club", name: "Club architecture", description: "35 nodes · automatic layout", spec: festival as DiagramSpec },
   { id: "platform", name: "Web platform", description: "Groups, icons & integrations", spec: platform },
   { id: "request", name: "Request lifecycle", description: "Decisions & branching flows", spec: request },
-  { id: "festival", name: "Festival (auto)", description: "Same topology · automatic layout", spec: festival as DiagramSpec },
+  // Manual mode reproduces the traced reference exactly: same panels, card
+  // positions and connector bends as out/club-editable.svg.
+  { id: "club-manual", name: "Club (traced)", description: "Hand-placed · 35 nodes · manual", spec: clubManual as DiagramSpec },
 ] as const;
 
 export function scriptFor(index: number) {

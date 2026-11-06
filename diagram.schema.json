@@ -105,6 +105,11 @@
         "direction": {
           "$ref": "#/$defs/direction"
         },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Cards per row when this panel is laid out as a grid. Without it, `direction` decides: right puts members in one row, down in one column, and a down panel with many cards becomes a squarish grid."
+        },
         "x": {
           "type": "number",
           "description": "Panel left edge; manual layout only."

@@ -1,56 +1,76 @@
 {
-  "title": "Festival architecture",
+  "title": "Club architecture",
   "direction": "right",
   "groups": [
+    {
+      "id": "clients",
+      "label": "Clients",
+      "tone": "neutral",
+      "dashed": true,
+      "direction": "down"
+    },
     {
       "id": "cf",
       "label": "Cloudflare",
       "tone": "warm",
-      "dashed": false
+      "dashed": false,
+      "direction": "down",
+      "columns": 2
     },
     {
       "id": "dok",
       "label": "Dokploy Server",
       "tone": "cool",
-      "dashed": false
+      "dashed": false,
+      "direction": "down"
     },
     {
       "id": "dok.invsys",
       "label": "Inventory System (SANGISAICF)",
       "tone": "cool",
       "dashed": true,
-      "parent": "dok"
+      "parent": "dok",
+      "direction": "right",
+      "columns": 3
     },
     {
       "id": "dok.pub",
       "label": "Festival Web (sangifes)",
       "tone": "cool",
       "dashed": true,
-      "parent": "dok"
+      "parent": "dok",
+      "direction": "down",
+      "columns": 4
     },
     {
       "id": "ext",
       "label": "External Services",
       "tone": "neutral",
-      "dashed": false
+      "dashed": false,
+      "direction": "down"
     },
     {
       "id": "backup",
       "label": "Backup Server (inside WireGuard)",
       "tone": "neutral",
-      "dashed": true
+      "dashed": true,
+      "direction": "right",
+      "columns": 2
     },
     {
       "id": "ci",
       "label": "Separate PC (CI)",
       "tone": "neutral",
-      "dashed": true
+      "dashed": true,
+      "direction": "down"
     },
     {
       "id": "offline",
       "label": "Photo Capture (offline)",
       "tone": "neutral",
-      "dashed": true
+      "dashed": true,
+      "direction": "right",
+      "columns": 3
     }
   ],
   "nodes": [
@@ -58,19 +78,22 @@
       "id": "clients.web",
       "label": "Visitors",
       "subtitle": "browser",
-      "shape": "terminal"
+      "shape": "terminal",
+      "group": "clients"
     },
     {
       "id": "clients.pwa",
       "label": "Organizers / Exhibitors",
       "subtitle": "browser",
-      "shape": "terminal"
+      "shape": "terminal",
+      "group": "clients"
     },
     {
       "id": "clients.android",
       "label": "Inventory Staff",
       "subtitle": "FZ-N1 Android",
-      "icon": "android"
+      "icon": "android",
+      "group": "clients"
     },
     {
       "id": "cf.status",

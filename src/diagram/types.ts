@@ -11,6 +11,14 @@ export interface GroupSpec {
   tone?: Tone;
   dashed?: boolean;
   direction?: Direction;
+  /**
+   * Cards per row when the panel is laid out as a grid.
+   *
+   * A panel is a visual cluster, so its shape is an authoring decision: a
+   * ten-card region reads as two columns of five, not one column of ten. This
+   * states that shape directly instead of hoping a solver derives it.
+   */
+  columns?: number;
   /** Explicit panel geometry; required for every node and group in manual mode. */
   x?: number;
   y?: number;

@@ -111,8 +111,8 @@ const EDGE_LABEL_SPACING = 6;
  * reads as columns of members instead of one wide row of cards.
  */
 const PERPENDICULAR: Record<Direction, Direction> = { right: "down", left: "down", down: "right", up: "right" };
-/** Panels with at least this many cards wrap their members into a grid. */
-const PANEL_WRAP_MIN = 4;
+/** A `down` panel with more cards than this becomes a grid instead of one column. */
+const GRID_ROWS_BEFORE_WRAP = 6;
 /**
  * Target width/height for a wrapped panel.
  *
@@ -454,7 +454,7 @@ const KINDS = ["primary", "secondary", "async"] as const satisfies readonly Edge
 
 const ROOT_FIELDS = ["title", "direction", "groups", "nodes", "edges", "flow", "layout", "defaults"];
 const DEFAULTS_FIELDS = ["width", "height", "cardX", "cardY", "cardWidth", "cardHeight"];
-const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction", "x", "y", "width", "height"];
+const GROUP_FIELDS = ["id", "label", "parent", "tone", "dashed", "direction", "columns", "x", "y", "width", "height"];
 const NODE_FIELDS = ["id", "label", "subtitle", "icon", "group", "shape", "x", "y", "width", "height", "cardX", "cardY", "cardWidth", "cardHeight"];
 const EDGE_FIELDS = ["id", "from", "to", "label", "kind", "fromSide", "toSide", "via", "fromAnchor", "toAnchor", "labelOffset", "labelAt"];
 /**
@@ -496,6 +496,8 @@ interface ValidatedGroup {
   tone: Tone;
   dashed: boolean;
   direction?: Direction;
+  /** Cards per row when this panel is laid out as a grid. */
+  columns?: number;
   /** Explicit panel rectangle in manual mode. */
   rect?: Rect;
 }
@@ -653,6 +655,15 @@ function readNumber(value: unknown, path: string): number {
   return value;
 }
 
+/** Read a positive whole number, such as a grid column count. */
+function readPositiveInteger(value: unknown, path: string): number {
+  const number = readNumber(value, path);
+  if (!Number.isInteger(number) || number < 1) {
+    fail(path, `expected a positive whole number, received ${describeValue(value)}`);
+  }
+  return number;
+}
+
 function readArray(value: unknown, path: string): unknown[] {
   if (!Array.isArray(value)) fail(path, `expected an array, received ${describeValue(value)}`);
   return value;
@@ -696,6 +707,7 @@ function validateDiagram(input: unknown): ValidatedDiagram {
       tone: value.tone === undefined ? "neutral" : readEnum(value.tone, `${path}.tone`, TONES),
       dashed: value.dashed === undefined ? false : readBoolean(value.dashed, `${path}.dashed`),
       direction: readOptionalEnum(value.direction, `${path}.direction`, DIRECTIONS),
+      columns: value.columns === undefined ? undefined : readPositiveInteger(value.columns, `${path}.columns`),
     };
     const rect = readOptionalRect(value, path);
     if (rect !== undefined) group.rect = rect;
@@ -1934,78 +1946,142 @@ interface PanelInterior {
  * (including `direction`) on a root graph that also owns ports, and because the
  * wrapper keeps the panel's own run independent of anything around it.
  */
-async function layoutPanelAlone(
-  engine: ElkEngine,
-  children: ElkGraphNode[],
-  edges: ElkGraphEdge[],
-  direction: Direction,
-  options: { padding: string; wrap: boolean; minWidth: number; minHeight: number },
-): Promise<PanelInterior> {
-  const layoutOptions: Record<string, string> = {
-    "elk.algorithm": "layered",
-    "elk.direction": DIRECTION_TO_ELK[direction],
-    "elk.edgeRouting": "ORTHOGONAL",
-    "elk.padding": options.padding,
-    // Roomier than the per-node spacing: a panel is read as a cluster, and its
-    // internal wires need visible channels between the cards rather than the
-    // hairline gaps that a dense layered layout produces.
-    "elk.spacing.nodeNode": String(PANEL_NODE_SPACING),
-    "elk.layered.spacing.nodeNodeBetweenLayers": String(PANEL_LAYER_SPACING),
-    "elk.spacing.edgeNode": String(PANEL_EDGE_NODE_SPACING),
-    "elk.spacing.edgeEdge": String(PANEL_EDGE_EDGE_SPACING),
-    "elk.layered.spacing.edgeNodeBetweenLayers": String(PANEL_EDGE_NODE_SPACING),
-    "elk.spacing.edgeLabel": String(EDGE_LABEL_SPACING),
-    "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-    "elk.edgeLabels.placement": "CENTER",
-    "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
-    "elk.contentAlignment": "[H_CENTER,V_TOP]",
-    "elk.nodeSize.minimum": `(${Math.ceil(options.minWidth)},${Math.ceil(options.minHeight)})`,
-    // Fixed seed: the result must not depend on iteration order.
-    "elk.randomSeed": "1",
-  };
-  if (options.wrap) {
-    layoutOptions["elk.layered.wrapping.strategy"] = "SINGLE_EDGE";
-    layoutOptions["elk.aspectRatio"] = PANEL_WRAP_ASPECT;
+/**
+ * Lay a panel's members out as a grid.
+ *
+ * A panel is a visual cluster, and its shape is an authoring decision: nine
+ * services read as two columns of five, three clients as one column, three
+ * offline tools as one row. Handing that to a solver produces the shapes it finds
+ * convenient — a ten-card column, or cards reordered into whatever the wrapping
+ * pass chose — which is why the reference composition was unreachable.
+ *
+ * So the shape is declared (`columns`, else `direction`) and the positions follow
+ * mechanically: uniform cells sized to the largest member, each member centred in
+ * its cell. Declaration order is preserved left-to-right, top-to-bottom, so the
+ * script reads in the same order as the diagram.
+ *
+ * @param members Members in declaration order, with their measured sizes.
+ * @param columns Cards per row.
+ * @param padding Panel padding; the top reserves the heading.
+ * @param minWidth Width the heading needs.
+ * @returns Local positions and the resulting panel size.
+ */
+function gridPanel(
+  members: Array<{ id: string; width: number; height: number }>,
+  columns: number,
+  padding: { top: number; side: number; bottom: number },
+  minWidth: number,
+): PanelInterior {
+  const positions = new Map<string, Point>();
+  const routes = new Map<string, { points: Point[]; label?: Rect }>();
+  if (members.length === 0) {
+    return {
+      width: Math.max(minWidth, padding.side * 2),
+      height: padding.top + padding.bottom,
+      members: positions,
+      routes,
+    };
   }
 
-  const result = await engine.layout({
-    id: "wrapper",
-    layoutOptions: {
-      "elk.algorithm": "layered",
-      "elk.hierarchyHandling": "SEPARATE_CHILDREN",
-      "elk.padding": "[top=0,left=0,bottom=0,right=0]",
-    },
-    children: [{ id: "panel", layoutOptions, children, edges }],
+  const cellWidth = Math.max(...members.map((member) => member.width));
+  const cellHeight = Math.max(...members.map((member) => member.height));
+  const perRow = Math.max(1, Math.min(columns, members.length));
+  const rows = Math.ceil(members.length / perRow);
+
+  members.forEach((member, index) => {
+    const column = index % perRow;
+    const row = Math.floor(index / perRow);
+    // Cells are left-aligned, not centred. Cards in one panel are already
+    // equalised to the same width, so for a card grid the two are identical —
+    // but a panel that also holds sub-panels would otherwise push its own cards
+    // to the middle of the widest child, which reverses the left-to-right order
+    // of a flow that passes through both.
+    positions.set(member.id, {
+      x: Math.round(padding.side + column * (cellWidth + NODE_SPACING)),
+      y: Math.round(padding.top + row * (cellHeight + NODE_SPACING) + (cellHeight - member.height) / 2),
+    });
   });
 
-  const panel = result.children?.[0];
-  if (panel === undefined) throw new Error("Layout engine returned no geometry for a panel");
+  const width = Math.max(
+    minWidth,
+    padding.side * 2 + perRow * cellWidth + (perRow - 1) * NODE_SPACING,
+  );
+  const height = padding.top + padding.bottom + rows * cellHeight + (rows - 1) * NODE_SPACING;
+  return { width, height, members: positions, routes };
+}
 
-  const members = new Map<string, Point>();
-  for (const child of panel.children ?? []) members.set(child.id, { x: num(child.x), y: num(child.y) });
+/**
+ * Route the connectors a panel owns, inside its own grid.
+ *
+ * The grid leaves a channel between every pair of cells, so a connector is routed
+ * by the same obstacle-avoiding search the canvas uses: cards are obstacles and
+ * the channels are the free space. Doing it here rather than leaving connectors
+ * to the canvas keeps a panel's internal wiring inside the panel.
+ *
+ * @param edges Connectors this panel owns, with member-space endpoints.
+ * @param members Member sizes, in declaration order.
+ * @param positions Member positions from {@link gridPanel}.
+ * @param measureText Caller's text measurement, for label boxes.
+ */
+function routePanelEdges(
+  edges: Array<{ id: string; from: string; to: string; label?: { text: string; width: number; height: number } }>,
+  members: Array<{ id: string; width: number; height: number }>,
+  positions: Map<string, Point>,
+  measureText: MeasureText,
+): Map<string, { points: Point[]; label?: Rect }> {
+  const boxes = new Map<string, Rect>();
+  for (const member of members) {
+    const at = positions.get(member.id);
+    if (at === undefined) continue;
+    boxes.set(member.id, { x: at.x, y: at.y, width: member.width, height: member.height });
+  }
+  const all = [...boxes.values()];
+
   const routes = new Map<string, { points: Point[]; label?: Rect }>();
-  const origin: Rect = { x: 0, y: 0, width: 0, height: 0 };
-  for (const edge of panel.edges ?? []) {
-    const entry: { points: Point[]; label?: Rect } = { points: edgePolyline(edge, origin) };
-    const label = edge.labels?.[0];
-    if (label !== undefined) {
-      entry.label = { x: num(label.x), y: num(label.y), width: num(label.width), height: num(label.height) };
+  for (const edge of edges) {
+    const from = boxes.get(edge.from);
+    const to = boxes.get(edge.to);
+    if (from === undefined || to === undefined) continue;
+    const obstacles = all.filter((box) => box !== from && box !== to);
+    // Step outside each card before searching: a point on the border counts as
+    // blocked, so starting exactly on it would strand the search.
+    // Enter and leave through the horizontal edges when the two cards sit in
+    // different rows, and through the vertical ones when they share a row: that
+    // is the side whose step-out lands in a free channel rather than in the
+    // neighbouring card.
+    const sameRow = Math.abs(from.y + from.height / 2 - (to.y + to.height / 2)) < from.height / 2;
+    const start = sameRow
+      ? { x: from.x + (to.x > from.x ? from.width : 0), y: from.y + from.height / 2 }
+      : { x: from.x + from.width / 2, y: from.y + (to.y > from.y ? from.height : 0) };
+    const end = sameRow
+      ? { x: to.x + (from.x > to.x ? to.width : 0), y: to.y + to.height / 2 }
+      : { x: to.x + to.width / 2, y: to.y + (from.y > to.y ? to.height : 0) };
+    /**
+     * First point outside a card.
+     *
+     * Chosen from the side that faces the target, but only in the axis that
+     * leaves the row: cards in one grid row are separated horizontally, so a
+     * sideways step from a card border runs straight into its neighbour. The
+     * vertical step leaves the row and reaches the free channel between rows.
+     */
+    const stepOut = (point: Point, box: Rect): Point => {
+      const gap = NODE_SPACING / 2;
+      // Continue outward from whichever border this point sits on.
+      if (Math.abs(point.x - box.x) < 0.5) return { x: point.x - gap, y: point.y };
+      if (Math.abs(point.x - (box.x + box.width)) < 0.5) return { x: point.x + gap, y: point.y };
+      if (Math.abs(point.y - box.y) < 0.5) return { x: point.x, y: point.y - gap };
+      return { x: point.x, y: point.y + gap };
+    };
+    const inner = routeAround(stepOut(start, from), stepOut(end, to), obstacles);
+    const points = orthogonalize([start, ...inner, end]);
+    const entry: { points: Point[]; label?: Rect } = { points };
+    if (edge.label !== undefined) {
+      const placed = placeLabel(edge.label.text, points, measureText);
+      entry.label = placed;
     }
     routes.set(edge.id, entry);
   }
-
-  return { width: num(panel.width), height: num(panel.height), members, routes };
-}
-
-/** A border port on a panel: where a crossing connector leaves or enters it. */
-interface BorderPort {
-  id: string;
-  /** Container the port belongs to; the canvas is `undefined`. */
-  container: string | undefined;
-  /** Connector index this port serves. */
-  edgeIndex: number;
-  outward: boolean;
-  side: Side;
+  return routes;
 }
 
 /**
@@ -2097,79 +2173,87 @@ async function layoutComposed(
     sizes.set(`n:${placement.node.id}`, { x: 0, y: 0, width: placement.metrics.width, height: placement.metrics.height });
   }
 
-  const buildChildren = (members: string[]): ElkGraphNode[] =>
-    members.map((id) => {
-      const size = sizes.get(id)!;
-      const nodePorts: ElkPort[] = [];
-      if (id.startsWith("n:")) {
-        const placement = placements.get(id.slice(2))!;
-        for (const [side, portId] of placement.ports) {
-          const point = portPosition(placement.metrics, side);
-          nodePorts.push({ id: portId, x: point.x, y: point.y, width: 0, height: 0, layoutOptions: { "elk.port.side": side.toUpperCase() } });
-        }
-      }
-      const element: ElkGraphNode = {
-        id,
-        width: size.width,
-        height: size.height,
-        layoutOptions: nodePorts.length > 0 ? { "elk.portConstraints": "FIXED_POS" } : {},
-      };
-      if (nodePorts.length > 0) element.ports = nodePorts;
-      return element;
-    });
-
   /**
-   * Connectors a container routes itself.
+   * Connectors a panel owns, as member ids inside that panel.
    *
-   * A connector belongs to the innermost panel holding both of its endpoints, or
-   * to the canvas when no panel holds both. That is the only assignment under
-   * which every segment has both ends visible to the run that draws it.
+   * A connector belongs to the innermost panel holding both of its endpoints.
+   * That is the only assignment under which both ends are visible to whatever
+   * draws the segment.
    */
-  const ownEdges = (container: string | undefined, members: string[]): ElkGraphEdge[] => {
-    const result: ElkGraphEdge[] = [];
+  const ownEdges = (
+    container: string,
+    members: string[],
+  ): Array<{ id: string; from: string; to: string; label?: { text: string; width: number; height: number } }> => {
+    const result: Array<{ id: string; from: string; to: string; label?: { text: string; width: number; height: number } }> = [];
     for (const entry of edgeInputs) {
       const fromPanels = containersOf(entry.edge.from);
       const toPanels = containersOf(entry.edge.to);
       const shared = fromPanels.find((candidate) => toPanels.includes(candidate));
       if (shared !== container) continue;
-      const source = members.includes(`n:${entry.edge.from}`)
-        ? entry.from.ports.get(entry.sides.from) ?? `n:${entry.edge.from}`
-        : undefined;
-      const target = members.includes(`n:${entry.edge.to}`)
-        ? entry.to.ports.get(entry.sides.to) ?? `n:${entry.edge.to}`
-        : undefined;
-      if (source === undefined || target === undefined) continue;
-      const element: ElkGraphEdge = {
-        id: `e:${entry.index}`,
-        sources: [source],
-        targets: [target],
-        layoutOptions: edgePriorityOptions(entry.edge.kind, entry.onFlow),
-      };
-      if (entry.label !== undefined) {
-        element.label = { text: entry.label.text, width: entry.label.width, height: entry.label.height };
-        element.labels = [element.label];
-      }
-      result.push(element);
+      const fromId = `n:${entry.edge.from}`;
+      const toId = `n:${entry.edge.to}`;
+      if (!members.includes(fromId) || !members.includes(toId)) continue;
+      result.push({ id: `e:${entry.index}`, from: fromId, to: toId, label: entry.label });
     }
     return result;
   };
 
-  // --- Pass 1: each panel alone, deepest first ---
+  /**
+   * Members of a container as measured boxes, in declaration order.
+   *
+   * Every card in a panel takes the widest caption's width and the tallest
+   * caption's height, so the panel is a grid of equal cells. That is what makes
+   * a service cluster read as a table rather than a ragged collage, and it is
+   * why the reference composition has columns of identical cards.
+   */
+  const memberBoxes = (container: string): Array<{ id: string; width: number; height: number }> => {
+    const members = membersOf(container);
+    const cards = members.filter((id) => id.startsWith("n:"));
+    const widest = Math.max(0, ...cards.map((id) => sizes.get(id)!.width));
+    const tallest = Math.max(0, ...cards.map((id) => sizes.get(id)!.height));
+    return members.map((id) => {
+      const size = sizes.get(id)!;
+      if (!id.startsWith("n:")) return { id, width: size.width, height: size.height };
+      // Uniform cards, but never narrower than this card's own caption needs.
+      const width = Math.max(widest, size.width);
+      const height = Math.max(tallest, size.height);
+      sizes.set(id, { x: 0, y: 0, width, height });
+      return { id, width, height };
+    });
+  };
+
+  /**
+   * Cards per row for a panel.
+   *
+   * `columns` states it; otherwise `direction` gives the shape: `right` puts the
+   * members in one row, `down` in one column, and a `down` panel with enough
+   * members becomes the squarish grid a reader expects of a service cluster.
+   */
+  const columnsFor = (group: ValidatedGroup, count: number): number => {
+    if (group.columns !== undefined) return group.columns;
+    if (directionOf(group.id) === "right" || directionOf(group.id) === "left") return Math.max(1, count);
+    return count <= GRID_ROWS_BEFORE_WRAP ? 1 : Math.ceil(Math.sqrt(count));
+  };
+
+  // --- Pass 1: each panel as a grid, deepest first ---
   const panels = new Map<string, PanelInterior>();
   const deepestFirst = [...diagram.groups].sort((a, b) => depthOf(b.id) - depthOf(a.id));
   for (const group of deepestFirst) {
-    const members = membersOf(group.id);
-    const interior = await layoutPanelAlone(
-      engine,
-      buildChildren(members),
-      ownEdges(group.id, members),
-      directionOf(group.id),
-      {
-        padding: paddingExpr(GROUP_PAD_TOP, GROUP_PAD_SIDE, GROUP_PAD_BOTTOM),
-        wrap: (subtree.get(group.id)?.size ?? 0) >= PANEL_WRAP_MIN,
-        minWidth: measureText(group.label, GROUP_FONT) + GROUP_PAD_SIDE * 2 + GROUP_LABEL_GUTTER,
-        minHeight: GROUP_PAD_TOP + GROUP_PAD_BOTTOM,
-      },
+    const members = memberBoxes(group.id);
+    const padding = { top: GROUP_PAD_TOP, side: GROUP_PAD_SIDE, bottom: GROUP_PAD_BOTTOM };
+    const interior = gridPanel(
+      members,
+      columnsFor(group, members.length),
+      padding,
+      measureText(group.label, GROUP_FONT) + GROUP_PAD_SIDE * 2 + GROUP_LABEL_GUTTER,
+    );
+    // Route this panel's own connectors inside its grid, so its wiring never
+    // leaves the panel and never depends on where the panel lands.
+    interior.routes = routePanelEdges(
+      ownEdges(group.id, membersOf(group.id)),
+      members,
+      interior.members,
+      measureText,
     );
     panels.set(group.id, interior);
     sizes.set(`g:${group.id}`, { x: 0, y: 0, width: interior.width, height: interior.height });
@@ -2406,8 +2490,10 @@ async function layoutComposed(
       // route and then slid along it until it clears every card and every label
       // already placed. Without that nudge a label lands on whichever card
       // happens to sit under the route midpoint.
+      // The whole footprint is the obstacle, not just the icon square: a label
+      // resting on a caption is as unreadable as one resting on a card.
       scene.label = labelBox ?? placeLabelOnRoute(entry.label.text, points, measureText, [
-        ...sceneNodes.map((node) => node.card ?? node),
+        ...sceneNodes.map((node) => ({ x: node.x, y: node.y, width: node.width, height: node.height })),
         ...placedLabels,
       ]);
       placedLabels.push(scene.label);

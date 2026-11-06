@@ -730,6 +730,49 @@ describe("layoutDiagram: panel composition", () => {
     expect(firstClient).toBeLessThan(cf.x);
   });
 
+  test("lays a panel out as a grid with the declared column count", async () => {
+    const build = (columns?: number) =>
+      spec({
+        groups: [
+          { id: "panel", label: "Panel", ...(columns === undefined ? {} : { columns }) },
+          { id: "other", label: "Other" },
+        ],
+        nodes: [
+          ...Array.from({ length: 6 }, (_, index) => ({ id: `n${index}`, label: `Node ${index}`, icon: "redis", group: "panel" })),
+          { id: "out", label: "Outside", group: "other" },
+        ],
+        edges: [
+          ...Array.from({ length: 5 }, (_, index) => ({ from: `n${index}`, to: `n${index + 1}` })),
+          { from: "n0", to: "out" },
+        ],
+      });
+
+    const gridSize = async (columns?: number) => {
+      const scene = await layoutDiagram(build(columns), measure);
+      const cards = scene.nodes.filter((node) => node.parent === "panel");
+      return {
+        columns: new Set(cards.map((card) => Math.round(card.x))).size,
+        rows: new Set(cards.map((card) => Math.round(card.y))).size,
+      };
+    };
+
+    // A grid shape is stated, not derived: the reference composition depends on
+    // nine services reading as two columns of five, not one column of ten.
+    expect(await gridSize(2)).toEqual({ columns: 2, rows: 3 });
+    expect(await gridSize(3)).toEqual({ columns: 3, rows: 2 });
+    expect(await gridSize(6)).toEqual({ columns: 6, rows: 1 });
+  });
+
+  test("rejects a column count that is not a positive whole number", async () => {
+    for (const bad of [0, -1, 1.5]) {
+      await expect(layoutDiagram(spec({
+        groups: [{ id: "panel", label: "Panel", columns: bad }],
+        nodes: [{ id: "a", label: "A", group: "panel" }],
+        edges: [],
+      }), measure)).rejects.toThrow(/positive whole number/);
+    }
+  });
+
   test("a single panel keeps its own declared direction", async () => {
     const scene = await layoutDiagram(
       spec({

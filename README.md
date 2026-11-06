@@ -76,9 +76,11 @@ running site serves it at `/schema.json`. A small example:
 
 Layout is automatic. In composed diagrams, visible cards share a common grid
 pitch. Nested panels keep their own compact sizes beside a narrow rail of direct
-members. The main `flow` gets a shared row or column; small supporting panels sit
-below the panels they connect to. Wires attach to visible shapes and use short
-orthogonal lanes that avoid captions and panel headings.
+members. The main `flow` gets a shared row or column without displacing peer
+panel headings; spare columns remain available for frontend inputs. Supporting
+panels share a band below the main sections, with disconnected panels using its
+free space. Wires attach to visible shapes, separate shared arrowheads, and avoid
+captions and panel headings.
 
 Cycles, parallel connections, self-loops, and disconnected pieces are supported.
 Dense graphs can still produce wire crossings; automatic layout does not promise

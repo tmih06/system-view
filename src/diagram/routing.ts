@@ -89,14 +89,16 @@ function simplify(points: Point[]): Point[] {
  * port first turns in the gap above its caption, so the wire touches the icon
  * without drawing through its text. Explicit sides limit the candidates.
  */
-function ports(node: SceneNode, toward: SceneNode, side: Side | undefined, offset: number): Port[] {
+function ports(node: SceneNode, toward: SceneNode, side: Side | undefined, offset: number, used: Point[]): Port[] {
   const r = node.card ?? node;
   const dx = toward.x + toward.width / 2 - r.x - r.width / 2;
   const dy = toward.y + (toward.card?.height ?? toward.height) / 2 - r.y - r.height / 2;
-  return (side ? [side] : SIDES.filter(s => !(node.card && s === "south"))).map(s => {
+  const limit = Math.min(r.width, r.height) / 4;
+  const shifts = [...new Set([offset, offset - 12, offset + 12].map(value =>
+    Math.max(-limit, Math.min(limit, value))))];
+  return (side ? [side] : SIDES.filter(s => !(node.card && s === "south"))).flatMap(s => shifts.map(shift => {
     const n = NORMAL[s];
     const vertical = n.y !== 0;
-    const shift = Math.max(-Math.min(r.width, r.height) / 4, Math.min(Math.min(r.width, r.height) / 4, offset));
     const p = { x: r.x + r.width / 2 + n.x * r.width / 2 + (vertical ? shift : 0), y: r.y + r.height / 2 + n.y * r.height / 2 + (vertical ? 0 : shift) };
     let path: Point[];
     if (s === "south" && node.card) {
@@ -109,10 +111,14 @@ function ports(node: SceneNode, toward: SceneNode, side: Side | undefined, offse
       path = [p, gate];
     }
     const facing = n.x * dx + n.y * dy;
-    // Wrong-facing ports cost a bend, not an arbitrary canvas-wide detour.
-    const cost = path.slice(1).reduce((sum, p, i) => sum + distance(path[i], p), 0) + (facing < 0 ? BEND_COST * 2 : 0);
+    // Wrong-facing ports cost two bends. Twelve-pixel slots leave room for
+    // arrowheads; occupancy outweighs saving a few pixels of wire. The smaller
+    // offset bias keeps unused ports centred without forcing a long detour.
+    const occupied = used.reduce((sum, point) => sum + Math.max(0, 12 - distance(point, p)) * 12, 0);
+    const cost = path.slice(1).reduce((sum, p, i) => sum + distance(path[i], p), 0) +
+      (facing < 0 ? BEND_COST * 2 : 0) + Math.abs(shift - offset) * 0.3 + occupied;
     return { points: path, axis: path.at(-1)!.y === path.at(-2)!.y ? 0 : 1, cost };
-  });
+  }));
 }
 
 /** Penalty for sharing wire pixels or crossing a previous connector. */
@@ -222,6 +228,7 @@ export function routeWires(nodes: SceneNode[], groups: SceneGroup[], edges: Wire
   const priority = (e: WireSpec) => isFlow(e) ? 0 : e.kind === "primary" ? 1 : e.kind === "secondary" ? 2 : 3;
   const ordered = edges.map((edge, index) => ({ edge, index })).sort((a, b) => priority(a.edge) - priority(b.edge) || a.index - b.index);
   const segments: Segment[] = [];
+  const usedPorts = new Map<string, Point[]>();
   const result = new Map<string, SceneEdge>();
   for (const { edge } of ordered) {
     const from = byId.get(edge.from)!, to = byId.get(edge.to)!;
@@ -235,8 +242,8 @@ export function routeWires(nodes: SceneNode[], groups: SceneGroup[], edges: Wire
     const offset = (parallel.indexOf(edge) - (parallel.length - 1) / 2) * 10;
     let fromSide = edge.fromSide, toSide = edge.toSide;
     if (from === to) { fromSide ??= "east"; toSide ??= fromSide === "north" ? "west" : "north"; }
-    const starts = ports(from, to, fromSide, offset);
-    const ends = ports(to, from, toSide, offset);
+    const starts = ports(from, to, fromSide, offset, usedPorts.get(from.id) ?? []);
+    const ends = ports(to, from, toSide, offset, usedPorts.get(to.id) ?? []);
     // Only this wire's own stubs may enter its endpoint footprint. Every other
     // shape and every unrelated heading must also clear the escape segment.
     const freeStubs = (ports: Port[], own: SceneNode) => ports.filter(port => port.points.slice(1).every((p, i) =>
@@ -246,6 +253,12 @@ export function routeWires(nodes: SceneNode[], groups: SceneGroup[], edges: Wire
     ));
     const points = shortestRoute(freeStubs(starts, from), freeStubs(ends, to), obstacles, segments);
     result.set(edge.id, { id: edge.id, source: edge.from, target: edge.to, kind: edge.kind, points });
+    const fromPorts = usedPorts.get(from.id) ?? [];
+    fromPorts.push(points[0]);
+    usedPorts.set(from.id, fromPorts);
+    const toPorts = usedPorts.get(to.id) ?? [];
+    toPorts.push(points.at(-1)!);
+    usedPorts.set(to.id, toPorts);
     for (let i = 1; i < points.length; i++) segments.push({ a: points[i - 1], b: points[i] });
   }
   return edges.map(e => result.get(e.id)!);

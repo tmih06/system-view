@@ -18,28 +18,25 @@ import type { Direction, EdgeKind, Point, Rect } from "./types";
  * - A leaf panel (cards only) is a uniform grid. Every cell takes the largest
  *   measured card on the canvas, so all panels share one pitch and read as one
  *   table; cards sit at the cell's top-left so lanes share a baseline.
- * - A leaf panel holding two or more canvas-flow cards reserves one lane for
- *   exactly those cards, in flow order, on the panel's leading edge. The lane is
- *   a row on a horizontal canvas and a column on a vertical one, so it always
- *   lies across the axis the wires travel.
+ * - A panel carrying flow cards reserves an unobstructed lane for them.
+ *   Spare columns hold frontend inputs beside rather than in the flow column.
  * - A panel holding both direct cards and nested panels uses a narrow card rail
  *   beside a compact stack of nested panels. Nested panels keep their measured
  *   size instead of being inflated to one common cell, which is what used to grow
  *   a tall blank column inside the parent. A rail card wired into the stack is
  *   translated onto the line of the card it drives.
  * - Top-level panels that are structural (> 3 cards), carry the request path, or
- *   carry a primary wire form one row in declaration order. Panels are then
- *   translated until flow members share one line. Small satellite panels hang
- *   under the panel they connect to most strongly; fully disconnected panels take
- *   their own band at the origin.
+ *   carry a primary wire form one row in declaration order. Peer headings retain
+ *   a shared baseline; request entries align through internal routing bands.
+ *   Small satellites use a supporting band under their strongest connected owner,
+ *   and disconnected panels fill that band's unused intervals.
  *
  * Reversed canvas directions mirror the top-level composition, never a panel's
  * interior: an `up` canvas stacks panels bottom to top while each panel keeps its
  * heading on top and its own declared reading order.
  *
- * Nothing here stretches a card or invents a panel size: alignment is always a
- * translation, every gutter inside a panel is at least 36 px, and the gutter
- * between top-level panels is at least 48 px.
+ * Cards are never shrunk. Panel extents include headings and routing bands;
+ * every inside gutter is at least 36 px and top-level gutters at least 48 px.
  */
 export interface PlacementGroup {
   id: string;
@@ -200,22 +197,20 @@ interface Cell {
  * Cells for a panel's direct cards.
  *
  * Declaration order fills the grid row-major, and `columns` caps a row, which is
- * the shape the author declared. On top of that, a panel carrying two or more
- * canvas flow members reserves a lane for exactly those cards, in flow order, on
- * the panel's leading edge — the top for a horizontal canvas, the first column
- * for a vertical one. That is what lets a wire crossing panels meet the flow
- * without stepping around an unrelated card.
+ * the shape the author declared. Flow members reserve an unobstructed lane,
+ * with spare leading columns retained for frontend inputs. Declaration order
+ * breaks ties within each side of the request path.
  *
  * Cards declared before the earliest flow member go in front of the reserved
  * lane when there is room for a lane before it (horizontal canvas); on a vertical
- * canvas the leading column belongs to the flow, so they follow it. A single flow
- * member is not a lane: reserving one cell would cost the panel a whole lane.
+ * canvas the leading column belongs to the flow, so they follow it.
  *
  * @returns Sparse cells plus the grid's row and column counts.
  */
 function gridCells(
   members: readonly PlacementNode[],
   flowIndex: Map<string, number>,
+  edges: readonly PlacementEdge[],
   columns: number,
   horizontalFlow: boolean,
 ): { cells: Cell[]; rows: number; columns: number } {
@@ -223,7 +218,7 @@ function gridCells(
   const inFlow = members.filter((member) => flowIndex.has(member.id));
   const cells: Cell[] = [];
 
-  if (inFlow.length < 2) {
+  if (inFlow.length === 0 || (inFlow.length === 1 && cap === 1)) {
     members.forEach((node, index) => {
       cells.push({ node, row: Math.floor(index / cap), column: index % cap });
     });
@@ -241,15 +236,31 @@ function gridCells(
   }
 
   if (horizontalFlow) {
-    // Lanes are rows: side inputs declared first keep rows above the flow row.
-    const rows: PlacementNode[][] = [];
-    for (let index = 0; index < before.length; index += cap) rows.push(before.slice(index, index + cap));
-    rows.push(lane);
-    for (let index = 0; index < after.length; index += cap) rows.push(after.slice(index, index + cap));
-    rows.forEach((row, rowIndex) => {
-      row.forEach((node, column) => cells.push({ node, row: rowIndex, column }));
-    });
-    return { cells, rows: rows.length, columns: Math.max(1, ...rows.map((row) => row.length)) };
+    // A spare leading column belongs to the side inputs, not to the request
+    // lane. Keep reverse inputs below that column and dependencies below the
+    // lane instead of compacting every row back to column zero.
+    const leading = lane.length > 1 && before.length > 0 && cap > lane.length ? 1 : 0;
+    let row = 0;
+    for (let index = 0; index < before.length; index += cap) {
+      before.slice(index, index + cap).forEach((node, column) => cells.push({ node, row, column }));
+      row += 1;
+    }
+    lane.forEach((node, index) => cells.push({ node, row, column: leading + index }));
+    row += 1;
+    const inputs = leading === 0 ? [] : after.filter(node =>
+      edges.some(edge => edge.from === node.id && lane.some(member => member.id === edge.to)));
+    for (let index = 0; index < inputs.length; index += leading) {
+      inputs.slice(index, index + leading).forEach((node, column) => cells.push({ node, row, column }));
+      row += 1;
+    }
+    const dependencies = after.filter(node => !inputs.includes(node));
+    const available = cap - leading;
+    for (let index = 0; index < dependencies.length; index += available) {
+      dependencies.slice(index, index + available).forEach((node, column) =>
+        cells.push({ node, row, column: leading + column }));
+      row += 1;
+    }
+    return { cells, rows: row, columns: Math.max(cap, leading + lane.length) };
   }
 
   // Lanes are columns: the flow owns the leading column, one card per row, and
@@ -297,12 +308,13 @@ function gridLayout(
   direction: Direction,
   cell: { width: number; height: number },
   flowIndex: Map<string, number>,
+  edges: readonly PlacementEdge[],
   horizontalFlow: boolean,
 ): PanelLayout {
   if (members.length === 0) {
     return { width: minimumWidth, height: PAD_TOP + PAD_BOTTOM, areas: [] };
   }
-  const grid = gridCells(members, flowIndex, columns, horizontalFlow);
+  const grid = gridCells(members, flowIndex, edges, columns, horizontalFlow);
   const innerWidth = grid.columns * cell.width + (grid.columns - 1) * CELL_GAP;
   const innerHeight = grid.rows * cell.height + (grid.rows - 1) * CELL_GAP;
   const areas: Area[] = grid.cells.map((entry) => ({
@@ -601,6 +613,7 @@ function buildPanels(context: Context, direction: Direction): void {
         panelDirection,
         context.cell,
         context.flowIndex,
+        context.edges,
         flowHorizontal(direction),
       );
     }
@@ -712,17 +725,6 @@ function nodeRect(context: Context, item: PlacedItem, nodeId: string): Rect | un
   return { x: item.x + inner.x, y: item.y + inner.y, width: inner.width, height: inner.height };
 }
 
-/** Top-level item containing a card in the validated containment tree. */
-function itemOfNode(context: Context, node: PlacementNode): string {
-  if (node.group === undefined) return `n:${node.id}`;
-  const group = context.groupById.get(node.group)!;
-  let current = group;
-  for (;;) {
-    const parent = current.parent;
-    if (parent === undefined) return `g:${current.id}`;
-    current = context.groupById.get(parent)!;
-  }
-}
 
 /** True when the canvas reads left to right, so the flow runs horizontally. */
 function flowHorizontal(direction: Direction): boolean {
@@ -730,37 +732,74 @@ function flowHorizontal(direction: Direction): boolean {
 }
 
 /**
- * Translate top-level items until the canvas flow shares one line.
- *
- * Panels start with their first row at the same top offset, so a flow that only
- * uses the first row is already aligned. A panel whose flow member sits below an
- * earlier side row, or whose size differs from its neighbour's, is shifted as a
- * whole. Alignment is therefore a translation: no panel is stretched, no card is
- * resized and no gutter is consumed. Each item moves at most once, which keeps
- * the result stable when the flow revisits a panel.
+ * Open a routing band before an aligned entry without moving the heading or
+ * earlier rows. Increasing only the trailing extent preserves containment.
+ */
+function insertBand(layout: PanelLayout, item: CanvasItem, horizontal: boolean, threshold: number, delta: number): void {
+  for (const area of layout.areas) {
+    if (horizontal && area.y >= threshold) area.y += delta;
+    if (!horizontal && area.x >= threshold) area.x += delta;
+  }
+  if (horizontal) item.height = layout.height += delta;
+  else item.width = layout.width += delta;
+}
+
+/**
+ * Align the request path without letting a deep nested entry drag every peer
+ * panel down the canvas. Leaf panels gain a routing band before their entry;
+ * preceding cards and headings keep their alignment. Compound panels retain
+ * their measured interiors and translate only when necessary.
  */
 function alignFlow(context: Context, placed: PlacedItem[], direction: Direction): void {
-  const byKey = new Map(placed.map((entry) => [entry.key, entry]));
-  const sequence: Array<{ item: PlacedItem; node: PlacementNode }> = [];
-  for (const id of context.flowIndex.keys()) {
-    const node = context.nodeById.get(id);
-    if (node === undefined) continue;
-    const item = byKey.get(itemOfNode(context, node));
-    if (item !== undefined) sequence.push({ item, node });
+  const horizontal = flowHorizontal(direction);
+  const anchors: Array<{ item: PlacedItem; rect: Rect }> = [];
+  const flowIds = [...context.flowIndex.keys()];
+  for (const item of placed) {
+    const members = memberIds(context, item.key);
+    const id = flowIds.find(id => members.has(id));
+    if (id === undefined) continue;
+    const rect = nodeRect(context, item, id)!;
+    anchors.push({ item, rect });
   }
-  sequence.sort((a, b) => context.flowIndex.get(a.node.id)! - context.flowIndex.get(b.node.id)!);
-
-  const moved = new Set<string>();
-  for (let index = 1; index < sequence.length; index += 1) {
-    const previous = sequence[index - 1];
-    const current = sequence[index];
-    if (previous.item === current.item || moved.has(current.item.key)) continue;
-    const exit = nodeRect(context, previous.item, previous.node.id);
-    const entry = nodeRect(context, current.item, current.node.id);
-    if (exit === undefined || entry === undefined) continue;
-    if (flowHorizontal(direction)) current.item.y += exit.y - entry.y;
-    else current.item.x += exit.x - entry.x;
-    moved.add(current.item.key);
+  if (anchors.length === 0) return;
+  const target = Math.max(...anchors.map(anchor => horizontal ? anchor.rect.y : anchor.rect.x));
+  for (const { item, rect } of anchors) {
+    const delta = target - (horizontal ? rect.y : rect.x);
+    const layout = item.key.startsWith("g:") ? context.layouts.get(item.key.slice(2)) : undefined;
+    if (layout !== undefined && layout.areas.every(area => area.key.startsWith("n:"))) {
+      const threshold = horizontal ? rect.y - item.y : rect.x - item.x;
+      insertBand(layout, item.item, horizontal, threshold, delta);
+    } else if (horizontal) item.y += delta;
+    else item.x += delta;
+  }
+  // Ingress rails centre their primary inputs. Larger peripheral columns align
+  // the median connected row, keeping unrelated earlier rows at the top.
+  for (const item of placed) {
+    const inside = memberIds(context, item.key);
+    if (carriesFlow(context, item.key)) continue;
+    const ingress = inside.size <= 3;
+    const offsets = new Set<number>();
+    for (const edge of context.edges) {
+      if (ingress ? edge.kind !== "primary" : edge.kind === "async") continue;
+      const id = inside.has(edge.from) ? edge.from : inside.has(edge.to) ? edge.to : undefined;
+      const other = id === edge.from ? edge.to : edge.from;
+      if (id === undefined || !context.flowIndex.has(other)) continue;
+      const rect = nodeRect(context, item, id)!;
+      offsets.add(horizontal ? rect.y - item.y : rect.x - item.x);
+    }
+    if (offsets.size === 0) continue;
+    const sorted = [...offsets].sort((a, b) => a - b);
+    if (ingress) {
+      const offset = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
+      if (horizontal) item.y = target - offset;
+      else item.x = target - offset;
+    } else {
+      const layout = item.key.startsWith("g:") ? context.layouts.get(item.key.slice(2)) : undefined;
+      const delta = target - (horizontal ? item.y : item.x) - sorted[Math.floor(sorted.length / 2)];
+      if (delta > 0 && layout !== undefined && layout.areas.every(area => area.key.startsWith("n:"))) {
+        insertBand(layout, item.item, horizontal, sorted[0], delta);
+      }
+    }
   }
 }
 
@@ -769,9 +808,9 @@ function alignFlow(context: Context, placed: PlacedItem[], direction: Direction)
  *
  * The main row holds the major panels in declaration order, so the canvas keeps
  * the reading order the script declares instead of a solver's layer order.
- * Satellites hang below the major panel they talk to most, aligned to its left
- * edge; a disconnected satellite drops to a loose row below the left edge, which
- * is where a reader looks for something the diagram does not otherwise tie in.
+ * Satellites hang below the main row beside their strongest connected owner.
+ * Disconnected sections fill unused intervals in the supporting band instead of
+ * adding a whole extra row.
  *
  * Reversed canvas directions mirror the finished composition: the reading order
  * reverses, every relative alignment and gutter survives, and no rule needs a
@@ -799,14 +838,20 @@ export function placePanels(
    * Main row.
    *
    * Major items follow declaration order along the reading axis, so the canvas
-   * keeps the script's order rather than a solver's layer order. Both axes start
-   * at zero; `alignFlow` then slides panels into the request path.
+   * keeps the script's order rather than a solver's layer order. Leaf headings
+   * align with the first nested heading before request-entry alignment.
    */
   const row: PlacedItem[] = [];
+  const nestedBackbone = items.some(item =>
+    isMajor(context, item.key) && item.key.startsWith("g:") &&
+    (context.childrenOf.get(item.key.slice(2))?.length ?? 0) > 0);
   let cursor = 0;
   for (const item of items) {
     if (!isMajor(context, item.key)) continue;
-    row.push({ key: item.key, item, x: horizontal ? cursor : 0, y: horizontal ? 0 : cursor });
+    const leaf = !item.key.startsWith("g:") ||
+      (context.childrenOf.get(item.key.slice(2))?.length ?? 0) === 0;
+    const baseline = nestedBackbone && leaf ? PAD_TOP : 0;
+    row.push({ key: item.key, item, x: horizontal ? cursor : baseline, y: horizontal ? baseline : cursor });
     cursor += (horizontal ? item.width : item.height) + PANEL_GAP;
   }
   alignFlow(context, row, direction);
@@ -855,7 +900,6 @@ export function placePanels(
    */
   const satellites: PlacedItem[] = [];
   let bandCursor = 0;
-  let bandExtent = 0;
   for (const owner of row) {
     for (const item of owned.get(owner.key) ?? []) {
       const along = Math.max(horizontal ? owner.x : owner.y, bandCursor);
@@ -867,22 +911,24 @@ export function placePanels(
         y: horizontal ? across : along,
       });
       bandCursor = along + (horizontal ? item.width : item.height) + PANEL_GAP;
-      bandExtent = Math.max(bandExtent, across + (horizontal ? item.height : item.width));
     }
   }
 
-  // --- Disconnected satellites: their own band past the far edge, at the origin ---
+  // Disconnected sections use the first free interval in the supporting band.
+  // A lack of wires is not a reason to force a full extra row of whitespace.
   const loose: PlacedItem[] = [];
-  const looseAcross = (satellites.length > 0 ? bandExtent : horizontal ? rowHeight : rowWidth) + PANEL_GAP;
-  let looseCursor = 0;
   for (const item of unowned) {
-    loose.push({
-      key: item.key,
-      item,
-      x: horizontal ? looseCursor : looseAcross,
-      y: horizontal ? looseAcross : looseCursor,
-    });
-    looseCursor += (horizontal ? item.width : item.height) + PANEL_GAP;
+    let along = 0;
+    const across = (horizontal ? rowHeight : rowWidth) + PANEL_GAP;
+    const size = horizontal ? item.width : item.height;
+    for (const occupied of [...satellites, ...loose].sort((a, b) =>
+      (horizontal ? a.x - b.x : a.y - b.y))) {
+      const start = horizontal ? occupied.x : occupied.y;
+      const end = start + (horizontal ? occupied.item.width : occupied.item.height);
+      if (along + size + PANEL_GAP <= start) break;
+      if (along < end + PANEL_GAP) along = end + PANEL_GAP;
+    }
+    loose.push({ key: item.key, item, x: horizontal ? along : across, y: horizontal ? across : along });
   }
 
   /**

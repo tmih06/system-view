@@ -328,6 +328,33 @@ describe("layoutDiagram: composed connectors honour explicit sides", () => {
   });
 });
 
+describe("layoutDiagram: shared connector destinations", () => {
+  test("separates independent incoming arrowheads on the same visible side", async () => {
+    const scene = await layoutDiagram(spec({
+      groups: [
+        { id: "clients", label: "Clients", direction: "down", columns: 1 },
+        { id: "server", label: "Server", columns: 1 },
+      ],
+      nodes: [
+        ...["a", "b", "c"].map(id => ({ id, label: id, icon: "browser-user", group: "clients" })),
+        { id: "gateway", label: "Gateway", icon: "cloudflare", group: "server" },
+      ],
+      edges: ["a", "b", "c"].map(id => ({
+        id, from: id, to: "gateway", kind: "primary" as const,
+        fromSide: "east" as const, toSide: "west" as const,
+      })),
+    }), measure);
+    const target = nodeById(scene, "gateway");
+    const ends = scene.edges.map(edge => edge.points.at(-1)!);
+    for (let index = 0; index < ends.length; index++) {
+      expect(pointOnSide(ends[index], target, "west")).toBe(true);
+      for (let other = 0; other < index; other++) {
+        expect(Math.abs(ends[index].y - ends[other].y)).toBeGreaterThanOrEqual(8);
+      }
+    }
+  });
+});
+
 describe("layoutDiagram: composed connectors take the short way", () => {
   test("a short unobstructed connection does not detour around the panels", async () => {
     const scene = await layoutDiagram(

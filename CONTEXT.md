@@ -97,10 +97,17 @@ Placement finishes before wiring begins: moving a panel after routing would
 detach its endpoints. `flow` supplies the main reading axis; a rail lets a direct
 member share that axis with a card inside a nested panel. Grid cells have one
 canvas-wide pitch, but nested panels retain their individual extents.
+Peer headings align beside the first nested section. Flow alignment opens a band
+inside a leaf panel rather than pushing that whole panel down to a nested entry.
+Peripheral columns align their median connected row; small primary-input rails
+centre their connected entries. Disconnected sections fill unused intervals in
+the supporting band instead of creating another row.
 
 Composed wiring uses visible-shape ports and weighs distance, bends and existing
-wire lanes. Footprints, unrelated panels and heading text are obstacles. Labels
-stay beside their own route and avoid node text, headings and other labels.
+wire lanes. Previously used endpoints reserve nearby port slots, so independent
+incoming arrows remain distinguishable. Footprints, unrelated panels and heading
+text are obstacles. Labels stay beside their own route and avoid node text,
+headings and other labels.
 ELK's single-run strategy retains its closed-group direction restriction.
 
 `manual` places nodes at their authored `x`/`y`, takes group rectangles verbatim,

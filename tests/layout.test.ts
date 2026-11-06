@@ -639,6 +639,30 @@ describe("layoutDiagram: panel composition", () => {
     expect(columns.size).toBeGreaterThan(1);
   });
 
+  test("preserves the reference's panel hierarchy and frontend column without coordinates", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    const panel = (id: string) => scene.groups.find(group => group.id === id)!;
+    const card = (id: string) => nodeById(scene, id).card!;
+    const inventory = panel("dok.invsys");
+    // Peer sections start beside the first nested section, not halfway down the
+    // host just because its request entry is deeper inside the hierarchy.
+    expect(panel("cf").y).toBeCloseTo(inventory.y, 0);
+    expect(panel("ext").y).toBeCloseTo(inventory.y, 0);
+    // Frontends keep the leading column; the request chain starts beside them.
+    expect(card("dok.pub.site").x).toBeLessThan(card("dok.pub.apigw").x);
+    expect(card("dok.portal").x).toBeCloseTo(card("dok.pub.site").x, 0);
+    expect(card("dok.portal").y).toBeGreaterThan(card("dok.pub.apigw").y);
+    // Peripheral services keep the same visual rows as the application roles
+    // beside them, while GitHub stays beside the top Inventory row.
+    expect(card("ext.gh").y).toBeCloseTo(card("dok.invsys.inv").y, 0);
+    expect(card("ext.google").y).toBeCloseTo(card("dok.pub.site").y, 0);
+    expect(card("ext.discord").y).toBeCloseTo(card("dok.pub.apigw").y, 0);
+    expect(card("ext.flux").y).toBeCloseTo(card("dok.portal").y, 0);
+    // A disconnected section may use free space in the supporting band; it must
+    // not consume a whole extra row simply because it has no external wires.
+    expect(panel("offline").y).toBeLessThan(panel("backup").y + panel("backup").height);
+  });
+
   test("keeps crossing connectors clear of every card they do not connect", async () => {
     const scene = await layoutDiagram(club as DiagramSpec, measure);
     for (const edge of scene.edges) {

@@ -363,9 +363,6 @@ describe("placement: canvas composition", () => {
     // A second satellite shares that band and is pushed along it, not stacked on top.
     expect(other.y).toBe(aux.y);
     expect(other.x).toBeGreaterThanOrEqual(aux.x + aux.width + MIN_PANEL_GAP - 0.01);
-    // The disconnected panel drops to the bottom-left band.
-    expect(iso.x).toBe(0);
-    expect(iso.y).toBeGreaterThanOrEqual(aux.y + aux.height);
     for (const box of [aux, iso, other]) expect(overlaps(box, main)).toBe(false);
     expect(overlaps(aux, other)).toBe(false);
   });

@@ -1,16 +1,15 @@
 import {
   collectEdges,
   collectRects,
-  edgePolyline,
   loadEngine,
   num,
   orderedSections,
-  type ElkEngine,
   type ElkGraphEdge,
   type ElkGraphNode,
-  type ElkPort,
 } from "./elk";
 import { theme } from "./theme";
+import { placePanels } from "./placement";
+import { routeWires } from "./routing";
 import type {
   Direction,
   EdgeKind,
@@ -29,12 +28,11 @@ import type {
 /**
  * Coordinate-free diagram layout.
  *
- * `layoutDiagram` validates an untrusted `DiagramSpec`, measures every caption
- * with the caller's text measurement callback, hands a sized graph to ELK's
- * layered algorithm and translates the result into a `Scene` whose coordinates
- * are all absolute. No pixel geometry is accepted from the input, and none is
- * invented here: every number either comes from measured text, from an anchor
- * position ELK must respect, or from ELK's own output.
+ * `layoutDiagram` validates an untrusted `DiagramSpec`, measures captions with
+ * the caller's text measurement callback, and emits absolute scene geometry.
+ * A plain graph uses ELK; a composed diagram uses measured grids, compact
+ * nesting and a length-aware orthogonal router. Auto input accepts semantic
+ * layout hints, never pixel coordinates.
  *
  * Two strategies, chosen by graph shape:
  *
@@ -42,21 +40,17 @@ import type {
  *   `INCLUDE_CHILDREN` routes connectors across group boundaries, which a
  *   per-group recursive layout cannot do.
  * - **Panel composition** for a canvas holding several panels (see
- *   {@link layoutComposed}). One run per panel decides its interior, then one run
- *   places the panels as fixed boxes. This is what gives a canvas of large panels
- *   its overall shape: a single run either flattens every panel into one wide
- *   strip or, with wrapping enabled, throws inside ELK as soon as a connector
- *   crosses a wrapped panel's border.
+ *   {@link layoutComposed}). Measured card grids and rail/stack placement fix
+ *   all rectangles before wires are routed. This avoids moving the endpoints
+ *   of a path that was already calculated and aligns icons as well as captions.
  *
  * Shared between both strategies:
  * - Each node rectangle is sized to its *full footprint* (icon card plus caption,
  *   or a body shape's text block). Footprints are obstacles, so captions are
  *   protected from connectors by construction.
- * - Connector anchors are explicit ports pinned with `FIXED_POS`, so east/west
- *   endpoints sit at icon-card centre height rather than at the border of the
- *   wider, invisible caption box. The single-run path then pulls those endpoints
- *   onto the visible card edge; north/south endpoints already meet the footprint
- *   border.
+ * - Connectors use icon-height ports. ELK's single-run path pins footprint
+ *   ports and trims horizontal ends to the visible card; the composed router
+ *   attaches directly to visible shapes and escapes around their captions.
  *
  * Documented limits:
  * - In the single-run strategy a group's own `direction` is honoured only when
@@ -64,9 +58,8 @@ import type {
  *   self-directed subtree in its own run and still route crossing connectors, so
  *   an open group follows the enclosing direction. The composed strategy has no
  *   such limit and honours every panel's direction.
- * - `flow` is a routing preference: existing edges along the declared chain get a
- *   high straightness priority. It never adds connections and never guarantees
- *   exact alignment.
+ * - `flow` never invents connections. ELK treats it as a routing preference;
+ *   composed placement reserves an aligned lane for its cards where possible.
  */
 const CARD = theme.cardSize;
 const CAPTION_GAP = 8;
@@ -104,331 +97,6 @@ const EDGE_NODE_SPACING = 18;
 const EDGE_EDGE_SPACING = 12;
 const EDGE_LABEL_SPACING = 6;
 
-/**
- * Direction perpendicular to each direction.
- *
- * A panel inside a horizontal canvas flows vertically by default, so the canvas
- * reads as columns of members instead of one wide row of cards.
- */
-const PERPENDICULAR: Record<Direction, Direction> = { right: "down", left: "down", down: "right", up: "right" };
-/** A `down` panel with more cards than this becomes a grid instead of one column. */
-const GRID_ROWS_BEFORE_WRAP = 6;
-/**
- * Target width/height for a wrapped panel.
- *
- * Members flow down a column and the columns wrap, so ~0.5 gives two columns for
- * a nine-card panel: a grid read at a glance instead of a 1300 px strip.
- */
-const PANEL_WRAP_ASPECT = "0.5";
-/** Centre of a rectangle; the reference point a connector aims at. */
-function centreOf(rect: Rect): Point {
-  return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-}
-
-/**
- * Which side of a rectangle a point sits on.
- *
- * The nearest edge wins. Used to give a border crossing its departure side, so a
- * wire leaves the panel it came from heading outward instead of doubling back.
- */
-function sideAtRect(point: Point, rect: Rect): Side {
-  const distances: Array<[Side, number]> = [
-    ["west", Math.abs(point.x - rect.x)],
-    ["east", Math.abs(point.x - (rect.x + rect.width))],
-    ["north", Math.abs(point.y - rect.y)],
-    ["south", Math.abs(point.y - (rect.y + rect.height))],
-  ];
-  return distances.reduce((best, candidate) => (candidate[1] < best[1] ? candidate : best))[0];
-}
-
-/**
- * Pack elements into rows in declaration order.
- *
- * A deterministic packer, not a solver, because the canvas composition is an
- * authoring decision: the panels appear in the order the script lists them, and
- * the only variable is where a row breaks. Sizing each panel happens in an
- * earlier pass, so this only has to decide positions.
- *
- * Rows fill left to right until the next element would push the row past the
- * target length, then start a new row. A row is as tall as its tallest member and
- * every member is top-aligned, which keeps panel headings on a common line.
- *
- * @param items Element ids with their measured size, in declaration order.
- * @param gap Space between neighbours, on both axes.
- * @param targetAspect Desired width/height of the packed block.
- * @returns Absolute top-left position of each element, plus the block's extent.
- */
-function packInOrder(
-  items: Array<{ id: string; width: number; height: number }>,
-  gap: number,
-  targetAspect: number,
-): Map<string, Point> {
-  if (items.length === 0) return new Map();
-
-  /**
-   * Row layout with a cap on how many elements share a row.
-   *
-   * A width limit cannot express this correctly: three equal panels split evenly
-   * in half is `total / 2`, which is less than two panels plus a gap, so every
-   * row would hold one panel and the canvas would grow into a column. Capping the
-   * row *count* instead makes "two per row" directly reachable.
-   */
-  const fillWith = (cap: number): { positions: Map<string, Point>; width: number; height: number } => {
-    const positions = new Map<string, Point>();
-    let x = 0;
-    let y = 0;
-    let rowHeight = 0;
-    let widest = 0;
-    let inRow = 0;
-    for (const item of items) {
-      if (inRow > 0 && inRow >= cap) {
-        widest = Math.max(widest, x - gap);
-        x = 0;
-        y += rowHeight + gap;
-        rowHeight = 0;
-        inRow = 0;
-      }
-      positions.set(item.id, { x, y });
-      x += item.width + gap;
-      rowHeight = Math.max(rowHeight, item.height);
-      inRow += 1;
-    }
-    return { positions, width: Math.max(widest, x - gap), height: y + rowHeight };
-  };
-
-  // Try every cap and keep the canvas closest to the requested aspect. A cap is a
-  // direct, understandable knob ("at most N panels per row"), and the search is
-  // cheap because a canvas has a handful of top-level elements.
-  let best: { positions: Map<string, Point>; width: number; height: number } | undefined;
-  let bestScore = Number.POSITIVE_INFINITY;
-  for (let cap = 1; cap <= items.length; cap += 1) {
-    const candidate = fillWith(cap);
-    const score = Math.abs(candidate.width / Math.max(1, candidate.height) - targetAspect);
-    if (score < bestScore - 1e-9) {
-      bestScore = score;
-      best = candidate;
-    }
-  }
-  return best!.positions;
-}
-
-/**
- * Orthogonal route that treats rectangles as obstacles.
- *
- * Used where ELK cannot help: a connector that crosses a panel border has to
- * reach one specific card inside a panel that another run already laid out, and
- * a naive L or Z shape would cut straight through the cards in between.
- *
- * The approach is a visibility grid. Candidate lines are the free channels beside
- * every obstacle and the two endpoints, so any path along them is guaranteed to
- * stay clear of the cards and the result can never clip one. A breadth-first
- * search over that grid gives the fewest-turns route, and collinear points are
- * merged afterwards so the polyline has no redundant corners.
- *
- * @param start Absolute start point, outside every obstacle.
- * @param end Absolute end point.
- * @param obstacles Rectangles that must not be entered.
- * @returns An axis-aligned polyline from `start` to `end`.
- */
-function routeAround(start: Point, end: Point, obstacles: Rect[]): Point[] {
-  const clearance = NODE_SPACING / 2;
-  const axis = (values: number[]): number[] => [...new Set(values.map((value) => Math.round(value)))].sort((a, b) => a - b);
-
-  // Candidate lines: both endpoints, every obstacle's clearance edges, and the
-  // midpoint channels between them. Seeding both of the start's and the goal's
-  // coordinates is what lets the first and last legs be horizontal *or*
-  // vertical.
-  /**
-   * Candidate grid lines.
-   *
-   * Both endpoints seed a line, so the first and last legs may run either way.
-   * Every obstacle contributes its two clearance edges. The midpoints between
-   * consecutive lines matter most: that is where the free channel between two
-   * cards lies, and without those lines a tight pair of cards reads as solid and
-   * the search is forced around the whole panel.
-   */
-  const withMidpoints = (values: number[]): number[] => {
-    const sorted = axis(values);
-    const midpoints: number[] = [];
-    for (let index = 1; index < sorted.length; index += 1) {
-      midpoints.push((sorted[index - 1] + sorted[index]) / 2);
-    }
-    return axis([...sorted, ...midpoints]);
-  };
-  const xs = withMidpoints([
-    start.x,
-    end.x,
-    ...obstacles.flatMap((r) => [r.x - clearance, r.x + r.width + clearance]),
-  ]);
-  const ys = withMidpoints([
-    start.y,
-    end.y,
-    ...obstacles.flatMap((r) => [r.y - clearance, r.y + r.height + clearance]),
-  ]);
-
-  /**
-   * True when a grid point sits in an obstacle's interior.
-   *
-   * Strict interior, not the expanded border: a corridor line runs *along* the
-   * clearance edge of two neighbouring cards, and treating that line as blocked
-   * would close the only channel between them.
-   */
-  const blocked = (point: Point): boolean =>
-    obstacles.some(
-      (r) =>
-        point.x > r.x + 0.5 &&
-        point.x < r.x + r.width - 0.5 &&
-        point.y > r.y + 0.5 &&
-        point.y < r.y + r.height - 0.5,
-    );
-
-  /**
-   * True when the open segment between two grid points stays clear.
-   *
-   * Grid candidates are axis-aligned by construction, so the test is an exact
-   * interval overlap against each obstacle's interior — no sampling, and no way
-   * for a thin obstacle to slip between two samples.
-   */
-  const clearBetween = (a: Point, b: Point): boolean => {
-    const inset = 0.5;
-    for (const r of obstacles) {
-      const left = r.x + inset;
-      const right = r.x + r.width - inset;
-      const top = r.y + inset;
-      const bottom = r.y + r.height - inset;
-      if (a.y === b.y) {
-        if (a.y > top && a.y < bottom && Math.max(a.x, b.x) > left && Math.min(a.x, b.x) < right) return false;
-      } else if (a.x > left && a.x < right && Math.max(a.y, b.y) > top && Math.min(a.y, b.y) < bottom) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  /**
-   * Keep the search inside the region the connector actually needs.
-   *
-   * The whole canvas is reachable through the gaps between panels, so an
-   * unbounded search happily routes the long way round a panel instead of
-   * through the empty space beside it. Bounding it to the endpoints' own box,
-   * plus one gutter of slack, makes the short way through the gutter win.
-   */
-  const padding = NODE_SPACING * 2;
-  const box = {
-    left: Math.min(start.x, end.x) - padding,
-    right: Math.max(start.x, end.x) + padding,
-    top: Math.min(start.y, end.y) - padding,
-    bottom: Math.max(start.y, end.y) + padding,
-  };
-  const inBox = (point: Point): boolean =>
-    point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
-
-  const key = (x: number, y: number) => `${x},${y}`;
-  const startKey = key(start.x, start.y);
-  const goalKey = key(end.x, end.y);
-
-  /**
-   * Breadth-first search over the grid lines.
-   *
-   * Breadth-first rather than cheapest-first because every step costs the same
-   * distance class: it finds the route with the fewest corridor hops, which is
-   * also the one with the fewest turns after collinear points are merged.
-   */
-  const search = (gridX: number[], gridY: number[], accept: (point: Point) => boolean): Point[] | undefined => {
-    const previous = new Map<string, string>();
-    const visited = new Set<string>([startKey]);
-    const queue: Point[] = [start];
-    let found = false;
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (key(current.x, current.y) === goalKey) {
-        found = true;
-        break;
-      }
-      const candidates = [...gridX.map((x) => ({ x, y: current.y })), ...gridY.map((y) => ({ x: current.x, y }))];
-      for (const candidate of candidates) {
-        const id = key(candidate.x, candidate.y);
-        if (visited.has(id) || blocked(candidate) || !accept(candidate)) continue;
-        if (!clearBetween(current, candidate)) continue;
-        visited.add(id);
-        previous.set(id, key(current.x, current.y));
-        queue.push(candidate);
-      }
-    }
-    if (!found) return undefined;
-    const result: Point[] = [];
-    for (let cursor: string | undefined = goalKey; cursor !== undefined; cursor = previous.get(cursor)) {
-      const [x, y] = cursor.split(",").map(Number);
-      result.push({ x, y });
-    }
-    result.reverse();
-    return orthogonalize(result);
-  };
-
-  /**
-   * A point inside an "allowed" panel is only blocked by that panel's cards, not
-   * by the panel outline: a crossing connector legitimately starts inside the
-   * panel it is leaving. The caller excludes allowed panels from the obstacle
-   * list for exactly this reason, so the search can begin there.
-   */
-  const narrow = search(xs, ys, inBox);
-    if (narrow !== undefined) return narrow;
-  // The narrow box had no route (a target card can sit behind another). Widen to
-  // the whole canvas and search again: the long way round is still a route that
-  // never crosses a card.
-  const wideXs = axis([...xs, ...obstacles.flatMap((r) => [r.x - clearance * 4, r.x + r.width + clearance * 4])]);
-  const wideYs = axis([...ys, ...obstacles.flatMap((r) => [r.y - clearance * 4, r.y + r.height + clearance * 4])]);
-  const wide = search(wideXs, wideYs, () => true);
-  if (wide !== undefined) return wide;
-
-  // No clear route at any width: a two-corner path keeps the wire connected
-  // rather than dropping it.
-  return orthogonalize([start, { x: end.x, y: start.y }, end]);
-}
-
-/**
- * Orthogonal route between two border points, around the space between them.
- *
- * Each end steps outward by the node gap, then the two steps are joined through
- * the midpoint of the remaining axis. The result only ever occupies the gutter,
- * so a panel's cards are never crossed by a connector that merely passes by.
- */
-function routeBetween(start: Point, startSide: Side, end: Point, endSide: Side): Point[] {
-  const reach = NODE_SPACING;
-  const step = (point: Point, side: Side): Point => {
-    switch (side) {
-      case "east":
-        return { x: point.x + reach, y: point.y };
-      case "west":
-        return { x: point.x - reach, y: point.y };
-      case "south":
-        return { x: point.x, y: point.y + reach };
-      case "north":
-        return { x: point.x, y: point.y - reach };
-    }
-  };
-  const from = step(start, startSide);
-  const to = step(end, endSide);
-  const midX = Math.round((from.x + to.x) / 2);
-  const midY = Math.round((from.y + to.y) / 2);
-  return orthogonalize([from, { x: midX, y: from.y }, { x: midX, y: to.y }, to]);
-}
-
-/**
- * Target width/height of the packed canvas.
- *
- * Slightly landscape, which suits a browser pane. It only decides where a row
- * breaks; it never stretches a panel.
- */
-const TARGET_CANVAS_ASPECT = 1.35;
-/** Card-to-card spacing inside a panel. */
-const PANEL_NODE_SPACING = 48;
-/** Layer-to-layer spacing inside a panel; wires run down these channels. */
-const PANEL_LAYER_SPACING = 72;
-/** Clearance between a wire and a card inside a panel. */
-const PANEL_EDGE_NODE_SPACING = 24;
-/** Clearance between two parallel wires inside a panel. */
-const PANEL_EDGE_EDGE_SPACING = 18;
 
 /** Tolerance for treating two coordinates as the same point or the same border. */
 const EPS = 0.75;
@@ -1135,23 +803,6 @@ function jointContainer(
   return chain(nodeA).find((candidate) => other.has(candidate));
 }
 
-/**
- * One authored connector, resolved to the sides it leaves and enters.
- *
- * Shared between the single-run builder and the panel composer so both agree on
- * anchor sides and label boxes for the same script.
- */
-interface EdgeInput {
-  elkId: string;
-  edge: ValidatedEdge;
-  from: NodePlacement;
-  to: NodePlacement;
-  sides: { from: Side; to: Side };
-  label?: { text: string; width: number; height: number };
-  onFlow: boolean;
-  /** Declaration index, used to key per-container ELK edges. */
-  index: number;
-}
 
 interface NodePlacement {
   node: ValidatedNode;
@@ -1832,17 +1483,9 @@ function assertManualGeometry(groups: SceneGroup[], nodes: SceneNode[], edges: S
 }
 
 /**
- * Place a connector label where it neither covers a card nor another label.
- *
- * Candidates march along the route from the midpoint outward, alternating
- * before and after it, and the first that clears every obstacle wins. Falling
- * back to the midpoint keeps a label even when the route is fully crowded, so a
- * label is never dropped — it is only moved.
- *
- * @param text Label text, possibly pre-wrapped.
- * @param points Route the label annotates.
- * @param measureText Caller's text measurement.
- * @param obstacles Boxes the label must not overlap.
+ * Place a label beside a real route segment, never arbitrarily across the
+ * canvas. Prefer long horizontal segments with text above the wire, then scan
+ * other segments and their free side. Footprints and headings stay protected.
  */
 function placeLabelOnRoute(
   text: string,
@@ -1850,36 +1493,28 @@ function placeLabelOnRoute(
   measureText: MeasureText,
   obstacles: Rect[],
 ): Rect & { text: string } {
-  const centred = placeLabel(text, points, measureText);
-  const overlaps = (a: Rect, b: Rect): boolean =>
-    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-  const clears = (box: Rect): boolean => obstacles.every((obstacle) => !overlaps(box, obstacle));
-  if (clears(centred)) return centred;
-
-  // Search outward on both axes: a label squeezed between two cards may only fit
-  // by moving sideways, and one under a wide card only by moving down.
-  const stepX = Math.max(12, centred.width / 2);
-  const stepY = Math.max(10, centred.height);
-  for (let distance = 1; distance <= 24; distance += 1) {
-    for (const [dx, dy] of [
-      [0, distance * stepY],
-      [0, -distance * stepY],
-      [distance * stepX, 0],
-      [-distance * stepX, 0],
-      [distance * stepX, distance * stepY],
-      [-distance * stepX, distance * stepY],
-      [distance * stepX, -distance * stepY],
-      [-distance * stepX, -distance * stepY],
-    ]) {
-      const candidate: Rect & { text: string } = {
-        ...centred,
-        x: round(centred.x + dx),
-        y: round(centred.y + dy),
-      };
-      if (clears(candidate)) return candidate;
+  const measured = placeLabel(text, points, measureText);
+  const segments = points.slice(1).map((b, index) => {
+    const a = points[index];
+    return { a, b, horizontal: a.y === b.y, length: Math.abs(a.x - b.x) + Math.abs(a.y - b.y) };
+  }).sort((a, b) => Number(b.horizontal) - Number(a.horizontal) || b.length - a.length);
+  for (let offset = 0; offset < 8; offset++) {
+    for (const segment of segments) {
+      for (const fraction of [0.5, 0.3, 0.7, 0.1, 0.9]) {
+        const x = segment.a.x + (segment.b.x - segment.a.x) * fraction;
+        const y = segment.a.y + (segment.b.y - segment.a.y) * fraction;
+        for (const sign of [-1, 1]) {
+          const candidate = {
+            ...measured,
+            x: round(x - measured.width / 2 + (segment.horizontal ? 0 : sign * (measured.width / 2 + 6 + offset * 12))),
+            y: round(y - measured.height / 2 + (segment.horizontal ? sign * (measured.height / 2 + 6 + offset * 12) : 0)),
+          };
+          if (obstacles.every(obstacle => !rectsOverlap(candidate, obstacle))) return candidate;
+        }
+      }
     }
   }
-  return centred;
+  throw new Error(`No clear position beside the connector for label "${text}"`);
 }
 
 /**
@@ -1929,579 +1564,63 @@ function placeLabel(
 // Public entry point
 // ---------------------------------------------------------------------------
 
-/** A panel's interior, in panel-local coordinates. */
-interface PanelInterior {
-  width: number;
-  height: number;
-  /** Member offsets, keyed by element id. */
-  members: Map<string, Point>;
-  /** Routes this panel drew itself, keyed by ELK edge id. */
-  routes: Map<string, { points: Point[]; label?: Rect }>;
-}
-
 /**
- * Lay out one panel in isolation and report its size and interior.
- *
- * The panel is wrapped in a synthetic parent because ELK rejects layout options
- * (including `direction`) on a root graph that also owns ports, and because the
- * wrapper keeps the panel's own run independent of anything around it.
+ * Place measured panels before routing. No path survives a later packing
+ * transform, and icon offsets are recomputed after cells have been equalized.
  */
-/**
- * Lay a panel's members out as a grid.
- *
- * A panel is a visual cluster, and its shape is an authoring decision: nine
- * services read as two columns of five, three clients as one column, three
- * offline tools as one row. Handing that to a solver produces the shapes it finds
- * convenient — a ten-card column, or cards reordered into whatever the wrapping
- * pass chose — which is why the reference composition was unreachable.
- *
- * So the shape is declared (`columns`, else `direction`) and the positions follow
- * mechanically: uniform cells sized to the largest member, each member centred in
- * its cell. Declaration order is preserved left-to-right, top-to-bottom, so the
- * script reads in the same order as the diagram.
- *
- * @param members Members in declaration order, with their measured sizes.
- * @param columns Cards per row.
- * @param padding Panel padding; the top reserves the heading.
- * @param minWidth Width the heading needs.
- * @returns Local positions and the resulting panel size.
- */
-function gridPanel(
-  members: Array<{ id: string; width: number; height: number }>,
-  columns: number,
-  padding: { top: number; side: number; bottom: number },
-  minWidth: number,
-): PanelInterior {
-  const positions = new Map<string, Point>();
-  const routes = new Map<string, { points: Point[]; label?: Rect }>();
-  if (members.length === 0) {
-    return {
-      width: Math.max(minWidth, padding.side * 2),
-      height: padding.top + padding.bottom,
-      members: positions,
-      routes,
-    };
-  }
-
-  const cellWidth = Math.max(...members.map((member) => member.width));
-  const cellHeight = Math.max(...members.map((member) => member.height));
-  const perRow = Math.max(1, Math.min(columns, members.length));
-  const rows = Math.ceil(members.length / perRow);
-
-  members.forEach((member, index) => {
-    const column = index % perRow;
-    const row = Math.floor(index / perRow);
-    // Cells are left-aligned, not centred. Cards in one panel are already
-    // equalised to the same width, so for a card grid the two are identical —
-    // but a panel that also holds sub-panels would otherwise push its own cards
-    // to the middle of the widest child, which reverses the left-to-right order
-    // of a flow that passes through both.
-    positions.set(member.id, {
-      x: Math.round(padding.side + column * (cellWidth + NODE_SPACING)),
-      y: Math.round(padding.top + row * (cellHeight + NODE_SPACING) + (cellHeight - member.height) / 2),
-    });
-  });
-
-  const width = Math.max(
-    minWidth,
-    padding.side * 2 + perRow * cellWidth + (perRow - 1) * NODE_SPACING,
-  );
-  const height = padding.top + padding.bottom + rows * cellHeight + (rows - 1) * NODE_SPACING;
-  return { width, height, members: positions, routes };
-}
-
-/**
- * Route the connectors a panel owns, inside its own grid.
- *
- * The grid leaves a channel between every pair of cells, so a connector is routed
- * by the same obstacle-avoiding search the canvas uses: cards are obstacles and
- * the channels are the free space. Doing it here rather than leaving connectors
- * to the canvas keeps a panel's internal wiring inside the panel.
- *
- * @param edges Connectors this panel owns, with member-space endpoints.
- * @param members Member sizes, in declaration order.
- * @param positions Member positions from {@link gridPanel}.
- * @param measureText Caller's text measurement, for label boxes.
- */
-function routePanelEdges(
-  edges: Array<{ id: string; from: string; to: string; label?: { text: string; width: number; height: number } }>,
-  members: Array<{ id: string; width: number; height: number }>,
-  positions: Map<string, Point>,
-  measureText: MeasureText,
-): Map<string, { points: Point[]; label?: Rect }> {
-  const boxes = new Map<string, Rect>();
-  for (const member of members) {
-    const at = positions.get(member.id);
-    if (at === undefined) continue;
-    boxes.set(member.id, { x: at.x, y: at.y, width: member.width, height: member.height });
-  }
-  const all = [...boxes.values()];
-
-  const routes = new Map<string, { points: Point[]; label?: Rect }>();
-  for (const edge of edges) {
-    const from = boxes.get(edge.from);
-    const to = boxes.get(edge.to);
-    if (from === undefined || to === undefined) continue;
-    const obstacles = all.filter((box) => box !== from && box !== to);
-    // Step outside each card before searching: a point on the border counts as
-    // blocked, so starting exactly on it would strand the search.
-    // Enter and leave through the horizontal edges when the two cards sit in
-    // different rows, and through the vertical ones when they share a row: that
-    // is the side whose step-out lands in a free channel rather than in the
-    // neighbouring card.
-    const sameRow = Math.abs(from.y + from.height / 2 - (to.y + to.height / 2)) < from.height / 2;
-    const start = sameRow
-      ? { x: from.x + (to.x > from.x ? from.width : 0), y: from.y + from.height / 2 }
-      : { x: from.x + from.width / 2, y: from.y + (to.y > from.y ? from.height : 0) };
-    const end = sameRow
-      ? { x: to.x + (from.x > to.x ? to.width : 0), y: to.y + to.height / 2 }
-      : { x: to.x + to.width / 2, y: to.y + (from.y > to.y ? to.height : 0) };
-    /**
-     * First point outside a card.
-     *
-     * Chosen from the side that faces the target, but only in the axis that
-     * leaves the row: cards in one grid row are separated horizontally, so a
-     * sideways step from a card border runs straight into its neighbour. The
-     * vertical step leaves the row and reaches the free channel between rows.
-     */
-    const stepOut = (point: Point, box: Rect): Point => {
-      const gap = NODE_SPACING / 2;
-      // Continue outward from whichever border this point sits on.
-      if (Math.abs(point.x - box.x) < 0.5) return { x: point.x - gap, y: point.y };
-      if (Math.abs(point.x - (box.x + box.width)) < 0.5) return { x: point.x + gap, y: point.y };
-      if (Math.abs(point.y - box.y) < 0.5) return { x: point.x, y: point.y - gap };
-      return { x: point.x, y: point.y + gap };
-    };
-    const inner = routeAround(stepOut(start, from), stepOut(end, to), obstacles);
-    const points = orthogonalize([start, ...inner, end]);
-    const entry: { points: Point[]; label?: Rect } = { points };
-    if (edge.label !== undefined) {
-      const placed = placeLabel(edge.label.text, points, measureText);
-      entry.label = placed;
-    }
-    routes.set(edge.id, entry);
-  }
-  return routes;
-}
-
-/**
- * Compose a diagram panel by panel.
- *
- * Used when the script describes several panels, which is the case a single ELK
- * run handles badly: every panel would either lose its own `direction` or be
- * forced into one wide strip. See the section comment for why this cannot be
- * expressed as one run.
- */
-async function layoutComposed(
+function layoutComposed(
   diagram: ValidatedDiagram,
   measureText: MeasureText,
-  context: {
-    groupOrder: ValidatedGroup[];
-    groupById: Map<string, ValidatedGroup>;
-    subtree: Map<string, Set<string>>;
-    placements: Map<string, NodePlacement>;
-    edgeInputs: EdgeInput[];
-    flowEdges: Set<string>;
-  },
-): Promise<Scene> {
-  const { groupOrder, groupById, subtree, placements, edgeInputs } = context;
-  const engine = await loadEngine();
-
-  /** Panels containing an element, innermost first; the element itself excluded. */
-  const containersOf = (id: string): string[] => {
-    const group = groupById.get(id);
-    const result: string[] = [];
-    let current = group === undefined ? placements.get(id)?.node.group : group.parent;
-    while (current !== undefined) {
-      result.push(current);
-      current = groupById.get(current)!.parent;
-    }
-    return result;
-  };
-
-  /**
-   * Direction a panel's members flow in.
-   *
-   * An explicit `direction` wins: it is the author stating the panel's reading
-   * order. Otherwise a panel takes the direction perpendicular to its enclosing
-   * run, so a horizontal canvas of panels reads as columns of members.
-   */
-  const directionOf = (groupId: string): Direction => {
-    const group = groupById.get(groupId)!;
-    if (group.direction !== undefined) return group.direction;
-    const parent = group.parent === undefined ? undefined : groupById.get(group.parent);
-    return parent === undefined ? PERPENDICULAR[diagram.direction] : PERPENDICULAR[directionOf(parent.id)];
-  };
-
-  /**
-   * Declaration position of an element, for ordering a container's members.
-   *
-   * A group has no index of its own in the script, so it takes the earliest
-   * position of any card inside it. That is what makes a canvas follow the
-   * script's reading order even when it mixes loose nodes and panels: the
-   * clients declared before Cloudflare stay before Cloudflare.
-   */
-  const declaredAt = (id: string): number => {
-    if (id.startsWith("n:")) return placements.get(id.slice(2))?.node.order ?? Number.MAX_SAFE_INTEGER;
-    const members = subtree.get(id.slice(2));
-    if (members === undefined || members.size === 0) return Number.MAX_SAFE_INTEGER;
-    let earliest = Number.MAX_SAFE_INTEGER;
-    for (const nodeId of members) earliest = Math.min(earliest, placements.get(nodeId)?.node.order ?? earliest);
-    return earliest;
-  };
-
-  /** Elements directly inside a container, in the order the script declares them. */
-  const membersOf = (container: string | undefined): string[] =>
-    [
-      ...groupOrder.filter((group) => group.parent === container).map((group) => `g:${group.id}`),
-      ...diagram.nodes.filter((node) => node.group === container).map((node) => `n:${node.id}`),
-    ].sort((a, b) => declaredAt(a) - declaredAt(b));
-
-  const depthOf = (groupId: string): number => {
-    let depth = 0;
-    let current = groupById.get(groupId)!.parent;
-    while (current !== undefined) {
-      depth += 1;
-      current = groupById.get(current)!.parent;
-    }
-    return depth;
-  };
-
-  // Sizes start as each node's measured footprint and are replaced by panel sizes.
-  const sizes = new Map<string, Rect>();
-  for (const placement of placements.values()) {
-    sizes.set(`n:${placement.node.id}`, { x: 0, y: 0, width: placement.metrics.width, height: placement.metrics.height });
-  }
-
-  /**
-   * Connectors a panel owns, as member ids inside that panel.
-   *
-   * A connector belongs to the innermost panel holding both of its endpoints.
-   * That is the only assignment under which both ends are visible to whatever
-   * draws the segment.
-   */
-  const ownEdges = (
-    container: string,
-    members: string[],
-  ): Array<{ id: string; from: string; to: string; label?: { text: string; width: number; height: number } }> => {
-    const result: Array<{ id: string; from: string; to: string; label?: { text: string; width: number; height: number } }> = [];
-    for (const entry of edgeInputs) {
-      const fromPanels = containersOf(entry.edge.from);
-      const toPanels = containersOf(entry.edge.to);
-      const shared = fromPanels.find((candidate) => toPanels.includes(candidate));
-      if (shared !== container) continue;
-      const fromId = `n:${entry.edge.from}`;
-      const toId = `n:${entry.edge.to}`;
-      if (!members.includes(fromId) || !members.includes(toId)) continue;
-      result.push({ id: `e:${entry.index}`, from: fromId, to: toId, label: entry.label });
-    }
-    return result;
-  };
-
-  /**
-   * Members of a container as measured boxes, in declaration order.
-   *
-   * Every card in a panel takes the widest caption's width and the tallest
-   * caption's height, so the panel is a grid of equal cells. That is what makes
-   * a service cluster read as a table rather than a ragged collage, and it is
-   * why the reference composition has columns of identical cards.
-   */
-  const memberBoxes = (container: string): Array<{ id: string; width: number; height: number }> => {
-    const members = membersOf(container);
-    const cards = members.filter((id) => id.startsWith("n:"));
-    const widest = Math.max(0, ...cards.map((id) => sizes.get(id)!.width));
-    const tallest = Math.max(0, ...cards.map((id) => sizes.get(id)!.height));
-    return members.map((id) => {
-      const size = sizes.get(id)!;
-      if (!id.startsWith("n:")) return { id, width: size.width, height: size.height };
-      // Uniform cards, but never narrower than this card's own caption needs.
-      const width = Math.max(widest, size.width);
-      const height = Math.max(tallest, size.height);
-      sizes.set(id, { x: 0, y: 0, width, height });
-      return { id, width, height };
-    });
-  };
-
-  /**
-   * Cards per row for a panel.
-   *
-   * `columns` states it; otherwise `direction` gives the shape: `right` puts the
-   * members in one row, `down` in one column, and a `down` panel with enough
-   * members becomes the squarish grid a reader expects of a service cluster.
-   */
-  const columnsFor = (group: ValidatedGroup, count: number): number => {
-    if (group.columns !== undefined) return group.columns;
-    if (directionOf(group.id) === "right" || directionOf(group.id) === "left") return Math.max(1, count);
-    return count <= GRID_ROWS_BEFORE_WRAP ? 1 : Math.ceil(Math.sqrt(count));
-  };
-
-  // --- Pass 1: each panel as a grid, deepest first ---
-  const panels = new Map<string, PanelInterior>();
-  const deepestFirst = [...diagram.groups].sort((a, b) => depthOf(b.id) - depthOf(a.id));
-  for (const group of deepestFirst) {
-    const members = memberBoxes(group.id);
-    const padding = { top: GROUP_PAD_TOP, side: GROUP_PAD_SIDE, bottom: GROUP_PAD_BOTTOM };
-    const interior = gridPanel(
-      members,
-      columnsFor(group, members.length),
-      padding,
-      measureText(group.label, GROUP_FONT) + GROUP_PAD_SIDE * 2 + GROUP_LABEL_GUTTER,
-    );
-    // Route this panel's own connectors inside its grid, so its wiring never
-    // leaves the panel and never depends on where the panel lands.
-    interior.routes = routePanelEdges(
-      ownEdges(group.id, membersOf(group.id)),
-      members,
-      interior.members,
-      measureText,
-    );
-    panels.set(group.id, interior);
-    sizes.set(`g:${group.id}`, { x: 0, y: 0, width: interior.width, height: interior.height });
-  }
-
-  // --- Pass 2: place the top-level panels in declaration order ---
-  const canvasMembers = membersOf(undefined);
-
-  /**
-   * Place the canvas with a packer, not with ELK.
-   *
-   * ELK orders a layer by its topology: a panel whose only edges arrive from
-   * below is pushed to the top of the canvas. That is a fine rule for an abstract
-   * graph and the wrong one for a composed diagram, where a reader expects the
-   * panels in the order the script declares them (clients, then Cloudflare, then
-   * the server it fronts). Declaration order is also what makes the composition
-   * reviewable: a panel that moves should be a diff in the script.
-   */
-  const canvasSizes = canvasMembers.map((id) => {
-    const size = sizes.get(id)!;
-    return { id, width: size.width, height: size.height };
-  });
-  const packed = packInOrder(canvasSizes, COMPONENT_SPACING, TARGET_CANVAS_ASPECT);
-
-  /** Absolute origin of every element, accumulated from the canvas downward. */
-  const origin = new Map<string, Point>();
-  for (const [id, position] of packed) origin.set(id, position);
-
-  const placeInside = (groupId: string): void => {
-    const interior = panels.get(groupId)!;
-    const base = origin.get(`g:${groupId}`);
-    if (base === undefined) return;
-    for (const [id, offset] of interior.members) {
-      origin.set(id, { x: base.x + offset.x, y: base.y + offset.y });
-      if (id.startsWith("g:")) placeInside(id.slice(2));
-    }
-  };
-  for (const id of canvasMembers) {
-    if (id.startsWith("g:")) placeInside(id.slice(2));
-  }
-
-  const rectOf = (id: string): Rect => {
-    const size = sizes.get(id);
-    const at = origin.get(id);
-    if (size === undefined || at === undefined) throw new Error(`Layout produced no geometry for "${id}"`);
-    return { x: at.x, y: at.y, width: size.width, height: size.height };
-  };
-
-  const sceneGroups: SceneGroup[] = groupOrder.map((group) => {
-    const rect = rectOf(`g:${group.id}`);
-    return {
-      id: group.id,
-      parent: group.parent,
-      label: group.label,
-      tone: group.tone,
-      dashed: group.dashed,
-      x: round(rect.x),
-      y: round(rect.y),
-      width: round(rect.width),
-      height: round(rect.height),
-    };
-  });
-
-  const sceneNodes: SceneNode[] = diagram.nodes.map((node) => {
-    const placement = placements.get(node.id)!;
-    const rect = rectOf(`n:${node.id}`);
+  context: { groupOrder: ValidatedGroup[]; placements: Map<string, NodePlacement> },
+): Scene {
+  const { groupOrder, placements } = context;
+  const geometry = placePanels(
+    groupOrder.map(group => ({ ...group, labelWidth: measureText(group.label, GROUP_FONT) })),
+    diagram.nodes.map(node => {
+      const metrics = placements.get(node.id)!.metrics;
+      return { id: node.id, group: node.group, width: metrics.width, height: metrics.height, order: node.order };
+    }),
+    diagram.edges,
+    diagram.flow,
+    diagram.direction,
+  );
+  const groups: SceneGroup[] = groupOrder.map(group => ({
+    id: group.id, parent: group.parent, label: group.label,
+    tone: group.tone, dashed: group.dashed, ...geometry.get(`g:${group.id}`)!,
+  }));
+  const nodes: SceneNode[] = diagram.nodes.map(node => {
+    const metrics = placements.get(node.id)!.metrics;
+    const rect = geometry.get(`n:${node.id}`)!;
     const scene: SceneNode = {
-      id: node.id,
-      parent: node.group,
-      shape: placement.metrics.shape,
-      labelLines: placement.metrics.labelLines,
-      subtitleLines: placement.metrics.subtitleLines,
-      x: round(rect.x),
-      y: round(rect.y),
-      width: round(rect.width),
-      height: round(rect.height),
+      ...rect, id: node.id, parent: node.group, shape: metrics.shape,
+      labelLines: metrics.labelLines, subtitleLines: metrics.subtitleLines,
     };
     if (node.icon !== undefined) scene.icon = node.icon;
-    if (placement.metrics.card !== null) {
+    if (metrics.card !== null) {
       scene.card = {
-        x: round(scene.x + placement.metrics.card.x),
-        y: round(scene.y + placement.metrics.card.y),
-        width: round(placement.metrics.card.width),
-        height: round(placement.metrics.card.height),
+        x: rect.x + (rect.width - metrics.card.width) / 2,
+        y: rect.y + metrics.card.y,
+        width: metrics.card.width, height: metrics.card.height,
       };
     }
     return scene;
   });
-
-  const sceneById = new Map(sceneNodes.map((node) => [node.id, node]));
-
-  // --- Pass 3: connectors ---
-  /** Labels already placed, collected as the map runs so later ones avoid them. */
-  const placedLabels: Rect[] = [];
-  const sceneEdges: SceneEdge[] = edgeInputs.map((entry) => {
-    const fromPanels = containersOf(entry.edge.from);
-    const toPanels = containersOf(entry.edge.to);
-    const shared = fromPanels.find((candidate) => toPanels.includes(candidate));
-
-    // Both ends inside one panel: that panel already drew the exact route.
-    const route = shared === undefined ? undefined : panels.get(shared)?.routes.get(`e:${entry.index}`);
-    let raw: Point[] = [];
-    let labelBox: SceneEdge["label"] | undefined;
-
-    if (route !== undefined) {
-      const base = origin.get(`g:${shared}`)!;
-      raw = route.points.map((point) => ({ x: base.x + point.x, y: base.y + point.y }));
-      if (route.label !== undefined && entry.label !== undefined) {
-        labelBox = {
-          text: entry.label.text,
-          x: round(base.x + route.label.x),
-          y: round(base.y + route.label.y),
-          width: round(route.label.width),
-          height: round(route.label.height),
-        };
-      }
-    } else {
-      // The wire crosses panel borders. It runs from the source card out to its
-      // panel's border, across the gutter, and into the target card. The gutter
-      // leg is routed *around* the intervening panels rather than straight
-      // through them, because a straight leg would cut across their cards.
-      const fromRect = rectOf(`n:${entry.edge.from}`);
-      const toRect = rectOf(`n:${entry.edge.to}`);
-      const startPanel = fromPanels[0];
-      const endPanel = toPanels[0];
-      const startBox = startPanel === undefined ? fromRect : rectOf(`g:${startPanel}`);
-      const endBox = endPanel === undefined ? toRect : rectOf(`g:${endPanel}`);
-      const start = borderPoint(startBox, centreOf(endBox));
-      const end = borderPoint(endBox, centreOf(startBox));
-      // Leave and enter on the side that faces the other box, so the first and
-      // last legs never double back across their own panel.
-      const startSide = sideAtRect(start, startBox);
-      const endSide = sideAtRect(end, endBox);
-      /**
-       * Obstacles for a crossing connector.
-       *
-       * Two tiers. Cards are hard obstacles everywhere. Panels outside the ones the
-       * wire touches are obstacles too, so a wire cannot plough through an
-       * unrelated cluster. The panels it does touch are excluded entirely: a wire
-       * reaching a card inside a panel legitimately starts inside that panel, and
-       * treating the outline as solid would strand the search.
-       */
-      // Every panel on either endpoint's ancestry is one the wire must be able to
-      // reach into; excluding only the innermost would make an outer panel look
-      // like solid ground and strand the search.
-      const allowedPanels = new Set([...fromPanels, ...toPanels]);
-      const obstacles = [
-        // Cards inside the target panel are avoided too: the wire has to reach
-        // one card in there, so its neighbours are exactly what it must not hit.
-        // Cards inside the target panel are avoided too: the wire has to reach one
-        // card in there, so its neighbours are exactly what it must not hit. The
-        // whole footprint is used, not just the icon square, because the caption
-        // is what a reader sees and a wire across it is the defect this guards.
-        ...sceneNodes
-          .filter((node) => node.id !== entry.edge.from && node.id !== entry.edge.to)
-          .map((node) => ({ x: node.x, y: node.y, width: node.width, height: node.height })),
-        ...sceneGroups
-          .filter((group) => !allowedPanels.has(group.id))
-          .map((group) => ({ x: group.x, y: group.y, width: group.width, height: group.height })),
-      ];
-      void startSide;
-      void endSide;
-      // Step outside both cards first, so neither endpoint starts inside the
-      // area the router treats as blocked. The step follows the centre-to-centre
-      // direction and lands a node gap past the card's own border, which is the
-      // closest point that is guaranteed clear of it.
-      /** True when a point sits inside any obstacle, inset so a border counts as free. */
-      const insideAny = (point: Point): boolean =>
-        obstacles.some(
-          (r) =>
-            point.x > r.x + 0.5 && point.x < r.x + r.width - 0.5 &&
-            point.y > r.y + 0.5 && point.y < r.y + r.height - 0.5,
-        );
-      /**
-       * First waypoint outside a card, on a side that is actually free.
-       *
-       * Axis-aligned, because the router only moves along the grid lines it is
-       * given. The side facing the target is tried first, then the others: a card
-       * can be packed tightly enough that its natural exit lands inside a
-       * neighbour, and choosing a blocked exit would strand the search and force
-       * the through-the-cards fallback.
-       */
-      const leave = (rect: Rect, toward: Rect): Point => {
-        const dx = toward.x + toward.width / 2 - (rect.x + rect.width / 2);
-        const dy = toward.y + toward.height / 2 - (rect.y + rect.height / 2);
-        const gap = NODE_SPACING;
-        const centreY = Math.round(rect.y + rect.height / 2);
-        const centreX = Math.round(rect.x + rect.width / 2);
-        const candidates: Array<{ point: Point; facing: number }> = [
-          { point: { x: Math.round(rect.x + rect.width + gap), y: centreY }, facing: dx },
-          { point: { x: Math.round(rect.x - gap), y: centreY }, facing: -dx },
-          { point: { x: centreX, y: Math.round(rect.y + rect.height + gap) }, facing: dy },
-          { point: { x: centreX, y: Math.round(rect.y - gap) }, facing: -dy },
-        ];
-        // Prefer a side pointing at the target, then any clear side.
-        candidates.sort((a, b) => b.facing - a.facing);
-        const free = candidates.find((candidate) => !insideAny(candidate.point));
-        return (free ?? candidates[0]).point;
-      };
-      const routeFrom = leave(fromRect, toRect);
-      const routeTo = leave(toRect, fromRect);
-      const inner = routeAround(routeFrom, routeTo, obstacles);
-      // `inner` already begins at `routeFrom` and ends at `routeTo`; repeating
-      // them would add zero-length legs and hide which side the wire leaves on.
-      // The card border point is rounded while the router's exit is not, so the
-      // first two points can differ by a fraction of a pixel. Snapping them to
-      // the same grid is what lets the wire report which side it leaves on.
-      const snap = (point: Point): Point => ({ x: Math.round(point.x), y: Math.round(point.y) });
-      raw = dedupe(
-        orthogonalize([borderPoint(fromRect, routeFrom), ...inner, borderPoint(toRect, routeTo)].map(snap)),
-      );
-    }
-
-    /**
-     * No card trim here.
-     *
-     * The single-run path starts on the footprint border and needs pulling onto the
-     * card. A composed route already starts on the card border, and trimming it
-     * again would move a vertical end sideways and detach the wire.
-     */
-    const points = orthogonalize(raw);
-    if (points.length < 2) {
-      throw new Error(`Connector "${entry.edge.id}" collapsed while routing; check its explicit sides`);
-    }
-    const scene: SceneEdge = {
-      id: entry.edge.id,
-      source: entry.edge.from,
-      target: entry.edge.to,
-      kind: entry.edge.kind,
-      points,
-    };
-    if (entry.label !== undefined) {
-      // A crossing connector has no box of its own, so its label is placed on the
-      // route and then slid along it until it clears every card and every label
-      // already placed. Without that nudge a label lands on whichever card
-      // happens to sit under the route midpoint.
-      // The whole footprint is the obstacle, not just the icon square: a label
-      // resting on a caption is as unreadable as one resting on a card.
-      scene.label = labelBox ?? placeLabelOnRoute(entry.label.text, points, measureText, [
-        ...sceneNodes.map((node) => ({ x: node.x, y: node.y, width: node.width, height: node.height })),
-        ...placedLabels,
-      ]);
-      placedLabels.push(scene.label);
-    }
-    return scene;
-  });
-
-  return normaliseScene(diagram.title, sceneGroups, sceneNodes, sceneEdges);
+  // Headings are obstacles: avoiding cards alone let wires and labels run
+  // through the text naming a panel.
+  const headings = groups.map(group => ({
+    x: group.x + 16, y: group.y + 10,
+    width: measureText(group.label, GROUP_FONT), height: 17,
+  }));
+  const edges = routeWires(nodes, groups, diagram.edges, diagram.flow, headings);
+  const labels: Rect[] = [];
+  for (let index = 0; index < edges.length; index++) {
+    const text = diagram.edges[index].label;
+    if (text === undefined) continue;
+    const label = placeLabelOnRoute(text, edges[index].points, measureText, [...nodes, ...headings, ...labels]);
+    edges[index].label = label;
+    labels.push(label);
+  }
+  return normaliseScene(diagram.title, groups, nodes, edges);
 }
 
 /**
@@ -2526,11 +1645,20 @@ function normaliseScene(
     maxX = Math.max(maxX, x);
     maxY = Math.max(maxY, y);
   };
-  for (const group of groups) extend(group.x + group.width, group.y + group.height);
-  for (const node of nodes) extend(node.x + node.width, node.y + node.height);
+  for (const group of groups) {
+    extend(group.x, group.y);
+    extend(group.x + group.width, group.y + group.height);
+  }
+  for (const node of nodes) {
+    extend(node.x, node.y);
+    extend(node.x + node.width, node.y + node.height);
+  }
   for (const edge of edges) {
     for (const point of edge.points) extend(point.x, point.y);
-    if (edge.label !== undefined) extend(edge.label.x + edge.label.width, edge.label.y + edge.label.height);
+    if (edge.label !== undefined) {
+      extend(edge.label.x, edge.label.y);
+      extend(edge.label.x + edge.label.width, edge.label.y + edge.label.height);
+    }
   }
 
   const shiftX = minX < 0 ? round(ROOT_PAD - minX) : 0;
@@ -2596,6 +1724,15 @@ export async function layoutDiagram(input: unknown, measureText: MeasureText): P
   const placements = new Map<string, NodePlacement>();
   for (const node of diagram.nodes) {
     placements.set(node.id, { node, metrics: measureNode(node, measureText), ports: new Map() });
+  }
+  // Explicit grid hints must also work for a single panel. Plain node flows and
+  // single panels without grid hints retain their topology-driven ELK layout.
+  const topLevelPanels = groupOrder.filter((group) => group.parent === undefined).length;
+  if (topLevelPanels >= 2 || groupOrder.some(group => group.columns !== undefined)) {
+    return layoutComposed(diagram, measureText, {
+      groupOrder,
+      placements,
+    });
   }
 
   const flowEdges = new Set<string>();
@@ -2743,30 +1880,6 @@ export async function layoutDiagram(input: unknown, measureText: MeasureText): P
     );
   }
 
-  /**
-   * Choose the composition strategy.
-   *
-   * A canvas of several panels is composed panel by panel: one run per panel (so
-   * each honours its own direction and may wrap its cards into a grid), then one
-   * run that places those panels as fixed boxes. A single run cannot do that —
-   * ELK drops a group's `direction` unless the group is separate, and its
-   * wrapping pipeline throws when a connector crosses a wrapped group's border —
-   * and the one-strip result is what motivated the split.
-   *
-   * A single panel, or a plain graph of nodes, keeps the single-run path: there
-   * is nothing to compose, and that path is the one already covered by tests.
-   */
-  const topLevelPanels = groupOrder.filter((group) => group.parent === undefined).length;
-  if (topLevelPanels >= 2) {
-    return layoutComposed(diagram, measureText, {
-      groupOrder,
-      groupById: new Map(diagram.groups.map((group) => [group.id, group])),
-      subtree,
-      placements,
-      edgeInputs,
-      flowEdges,
-    });
-  }
 
   const engine = await loadEngine();
   const laidOut = await engine.layout(root);

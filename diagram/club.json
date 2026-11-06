@@ -78,14 +78,14 @@
       "id": "clients.web",
       "label": "Visitors",
       "subtitle": "browser",
-      "shape": "terminal",
+      "icon": "browser-user",
       "group": "clients"
     },
     {
       "id": "clients.pwa",
       "label": "Organizers / Exhibitors",
       "subtitle": "browser",
-      "shape": "terminal",
+      "icon": "browser-users",
       "group": "clients"
     },
     {

@@ -64,6 +64,8 @@ running site serves it at `/schema.json`. A small example:
 | `direction` | `right`, `down`, `left`, or `up`; which way the flow reads |
 | `groups[]` | Tinted regions, optionally nested with `parent` |
 | `groups[].tone` | `warm`, `cool`, or `neutral`; `dashed` outlines the region |
+| `groups[].direction` | Reading direction inside a panel; independent of the canvas direction |
+| `groups[].columns` | Cards per row in a grid, without specifying any coordinates |
 | `nodes[]` | One card each; `group` places it inside a region |
 | `nodes[].shape` | `service` (default with an icon), `process`, `decision`, or `terminal` |
 | `nodes[].icon` | A local icon name, such as `cloudflare`, `redis`, or `postgresql` |
@@ -72,9 +74,15 @@ running site serves it at `/schema.json`. A small example:
 | `edges[].fromSide` / `toSide` | Pin an end to `north`, `east`, `south`, or `west` |
 | `flow` | A preferred main chain; each step must already have a connection |
 
-Layout is automatic. Cycles, parallel connections, self-loops, and disconnected
-pieces all work. Dense graphs can still produce crossings: it is automatic
-layout, not a promise to reproduce a particular hand-arranged picture.
+Layout is automatic. In composed diagrams, visible cards share a common grid
+pitch. Nested panels keep their own compact sizes beside a narrow rail of direct
+members. The main `flow` gets a shared row or column; small supporting panels sit
+below the panels they connect to. Wires attach to visible shapes and use short
+orthogonal lanes that avoid captions and panel headings.
+
+Cycles, parallel connections, self-loops, and disconnected pieces are supported.
+Dense graphs can still produce wire crossings; automatic layout does not promise
+the exact geometry of a hand-arranged picture.
 
 ### Hand-placed diagrams
 
@@ -98,8 +106,9 @@ When every card is the same size — the usual case — state that once in
 }
 ```
 
-The built-in "Club architecture" example is a manual diagram traced from a
-reference image, which is why it reproduces that layout exactly.
+The default **Club architecture** example is automatic: it uses groups,
+directions, column counts and a main flow, with no coordinates. **Club (traced)**
+is the separate manual reference.
 
 ## Icons
 

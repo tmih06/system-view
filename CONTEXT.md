@@ -32,6 +32,10 @@ tests/              behavioural tests over the engine
 | **card** | The visible icon square inside a service footprint. |
 | **flow** | An optional preferred chain of nodes; a routing preference, never a new connection. |
 | **auto / manual** | Automatic layout, or explicit authored coordinates. |
+| **grid** | Aligned rows and columns of card footprints; visible icons are centred in their cells. |
+| **rail** | A narrow row or column of direct members beside a stack of nested panels. |
+| **main row** | The large panels and primary-flow panels forming the composition's backbone. |
+| **satellite** | A small supporting panel placed below its strongest connected main panel. |
 
 ## The pipeline
 
@@ -43,9 +47,9 @@ tests/              behavioural tests over the engine
    required in manual mode.
 2. **Measure** (`measureNode`) — every caption is wrapped and measured through
    the caller's `measureText` callback, producing each node's footprint.
-3. **Layout** — `layoutManual` uses authored geometry; `layoutAutomatic` hands a
-   sized graph to [ELK](https://eclipse.dev/elk/) (`elkjs`) and translates the
-   result.
+3. **Layout** — manual geometry is authoritative. Plain flows use ELK; composed
+   panels use measured placement followed by connector routing. See the layout
+   behaviour in `README.md`.
 4. **Emit** — a `Scene` with absolute coordinates. Groups come parent-first;
    nodes and edges keep their input order and appear exactly once.
 
@@ -54,11 +58,10 @@ geometry, which is why a theme switch can recolour without re-running layout.
 
 ## Invariants that must stay true
 
-- **A composed canvas routes crossing connectors around cards.** A wire that
-  crosses panel borders is drawn by `routeAround`, a visibility-grid search that
-  treats cards and non-incident panels as obstacles. A naive L or Z shape cuts
-  through whatever sits between the two cards, which is why the search exists; a
-  test asserts no segment crosses a node it does not connect.
+- **Composed wires attach to visible shapes.** Captions and panel headings remain
+  protected even though they are not the attachment surface.
+- **Alignment applies to visible icons, not just footprint rectangles.** Resizing
+  a grid cell must keep its icon centred above its caption.
 - **`Scene` is theme-independent.** Layout uses the light `theme` metrics;
   palettes only change paint. `tests/render.test.ts` pins this: both palettes
   must emit identical path data.
@@ -86,30 +89,19 @@ geometry, which is why a theme switch can recolour without re-running layout.
 
 ## Layout modes
 
-`auto` has two strategies, chosen by graph shape. A canvas holding **two or more
-panels** is composed in layers: one ELK run per panel decides its interior (so
-each honours its own `direction` and a card-heavy panel wraps into a grid), then
-one run places those panels as fixed boxes. A single panel or a plain node graph
-uses one run, which is simpler and is what the existing tests cover.
+`auto` has two strategies. Plain flows and a single panel without grid hints use
+ELK. Multiple panels, or an explicit `columns` hint, use composed placement.
+The user-facing layout contract is documented in `README.md`.
 
-The split exists because the two features cannot coexist in one run: ELK honours
-a group's `direction` only when that group is its own run, and its wrapping
-pipeline throws as soon as a connector crosses the border of a wrapped group.
+Placement finishes before wiring begins: moving a panel after routing would
+detach its endpoints. `flow` supplies the main reading axis; a rail lets a direct
+member share that axis with a card inside a nested panel. Grid cells have one
+canvas-wide pitch, but nested panels retain their individual extents.
 
-Useful mental model:
-
-- The layered algorithm places nodes in layers along `direction` and routes
-  orthogonally.
-- Ports are pinned per side (`FIXED_POS`), so east/west endpoints sit at icon-card
-  height rather than the middle of the taller caption box. `trimToCard` then pulls
-  endpoints onto the visible card edge so a wire does not stop beside the caption.
-- In the one-run strategy a group's own `direction` is honoured only when the
-  group is *closed* — no connector crosses its border, directly or through a
-  nested group. ELK cannot lay out a self-directed subtree in its own run and
-  still route crossing connectors, so an open group follows the enclosing
-  direction. The composed strategy has no such limit.
-- `flow` raises routing priority along the declared chain. It never adds an edge
-  and never guarantees exact alignment.
+Composed wiring uses visible-shape ports and weighs distance, bends and existing
+wire lanes. Footprints, unrelated panels and heading text are obstacles. Labels
+stay beside their own route and avoid node text, headings and other labels.
+ELK's single-run strategy retains its closed-group direction restriction.
 
 `manual` places nodes at their authored `x`/`y`, takes group rectangles verbatim,
 draws each connector through its `via` points, and derives endpoints by
@@ -122,8 +114,10 @@ as a 90° staircase, and midpoints that would reverse direction are collapsed.
 | Path | Role |
 |---|---|
 | `src/diagram/types.ts` | The shared contract: spec, scene, and geometry types. |
-| `src/diagram/layout.ts` | Validation, measurement, both layout modes, and the two auto strategies. |
+| `src/diagram/layout.ts` | Validation, measurement, manual layout, strategy selection and label placement. |
 | `src/diagram/elk.ts` | ELK loading (with the `document` shim) and result translation. |
+| `src/diagram/placement.ts` | Measured grids, nested rails, flow alignment and satellite placement. |
+| `src/diagram/routing.ts` | Visible ports and distance/bend-aware orthogonal routing. |
 | `src/diagram/svg.ts` | `renderSvg`; also `orderGroups`, which both exporters share. |
 | `src/diagram/drawio.ts` | `renderDrawio` — editable draw.io export, no UI entry point. |
 | `src/diagram/theme.ts` | Metrics and both palettes. Metrics are identical across palettes. |

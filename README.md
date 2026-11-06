@@ -21,8 +21,9 @@ free port if that one is taken). `PORT=3007 bun run dev` picks the port yourself
 
 ## What it does
 
-- **Script on the left, diagram on the right.** Edit the JSON and the diagram
-  updates as you type; **Ctrl/Cmd + Enter** forces a re-run.
+- **Script on the left, diagram on the right.** Choose a starting example in the
+  editor header, then edit the JSON; selecting another example replaces your
+  script. The diagram updates as you type; **Ctrl/Cmd + Enter** forces a re-run.
 - **Two-tier captions and brand icons.** Each card shows a logo, a name, and a
   muted subtitle. Icons are local SVG files, so nothing is fetched at runtime.
 - **Tinted groups.** Warm, cool, and neutral panels read as regions, and groups
@@ -31,8 +32,9 @@ free port if that one is taken). `PORT=3007 bun run dev` picks the port yourself
   never cut through a card.
 - **Pan, zoom, and themes.** Drag to pan, scroll to zoom, double-click to fit.
   The light/dark toggle recolours the existing diagram without moving it.
-- **Errors are readable.** Invalid JSON shows a plain message under the editor
-  and keeps the last good diagram on screen.
+- **Status stays visible.** The editor footer shows rendering progress, node and
+  connection counts, or error details. Invalid scripts keep the last good diagram
+  on screen while you fix them.
 
 The script is not saved automatically — copy it out before you reload.
 

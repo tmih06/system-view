@@ -6,7 +6,7 @@ import { renderSvg } from "../src/diagram/svg";
 import type { IconMap, Scene } from "../src/diagram/types";
 import { ScriptEditor } from "./ScriptEditor";
 import { Whiteboard } from "./Whiteboard";
-import { scriptFor } from "./examples";
+import { examples, scriptFor } from "./examples";
 
 /** Layout output, independent of paint: a theme change must not re-run ELK. */
 interface LaidOut { scene: Scene; icons: IconMap }
@@ -25,8 +25,10 @@ function readStoredTheme(): ThemeName {
 /** Restore the last split; ignore missing, corrupt, or out-of-range values. */
 function readStoredWidth() {
   try {
-    const stored = Number(localStorage.getItem(WIDTH_KEY));
-    return Number.isFinite(stored) && stored >= 0 && stored <= 85 ? stored : 50;
+    const stored = localStorage.getItem(WIDTH_KEY);
+    if (stored === null) return 50;
+    const width = Number(stored);
+    return Number.isFinite(width) && width >= 0 && width <= 85 ? width : 50;
   } catch {
     return 50;
   }
@@ -56,6 +58,7 @@ async function loadIcons(scene: Scene): Promise<IconMap> {
 
 function App() {
   const [source, setSource] = useState(() => scriptFor(0));
+  const [selectedExample, setSelectedExample] = useState<number | null>(0);
   const [laidOut, setLaidOut] = useState<LaidOut | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -120,8 +123,43 @@ function App() {
       style={{ gridTemplateColumns: `${editorWidth}% minmax(0, 1fr)` }}
     >
     <section id="script-panel" className="editor-pane" aria-label="Script editor panel" inert={editorWidth === 0} style={{ visibility: editorWidth === 0 ? "hidden" : "visible" }}>
-      <ScriptEditor value={source} onChange={setSource} onRun={run} dark={themeName === "dark"} />
-      {error && <div className="script-error" role="alert">{error}</div>}
+      <header className="editor-header">
+        <label htmlFor="example-select">Example</label>
+        <select
+          id="example-select"
+          value={selectedExample ?? ""}
+          onChange={(event) => {
+            const index = Number(event.target.value);
+            setSelectedExample(index);
+            setSource(scriptFor(index));
+          }}
+        >
+          {selectedExample === null && <option value="" disabled>Custom script</option>}
+          {examples.map((example, index) => <option key={example.id} value={index}>{example.name}</option>)}
+        </select>
+      </header>
+      <ScriptEditor
+        value={source}
+        onChange={(value) => {
+          // Controlled updates from the example selector also reach CodeMirror's
+          // listener. Only actual edits should change the selector to Custom.
+          if (value === source) return;
+          setSource(value);
+          setSelectedExample(null);
+        }}
+        onRun={run}
+        dark={themeName === "dark"}
+      />
+      <footer className="editor-footer">
+        <div className="editor-status" data-state={busy ? "busy" : error ? "error" : "ready"} role="status" aria-atomic="true">
+          <span className="status-label">{busy ? "Rendering…" : error ? "Diagram error" : "Ready"}</span>
+          {!busy && !error && laidOut && <span>
+            {laidOut.scene.nodes.length} {laidOut.scene.nodes.length === 1 ? "node" : "nodes"} · {laidOut.scene.edges.length} {laidOut.scene.edges.length === 1 ? "connection" : "connections"}
+          </span>}
+          {!busy && error && laidOut && <span>Showing last successful diagram</span>}
+        </div>
+        {!busy && error && <div className="script-error" role="alert">{error}</div>}
+      </footer>
     </section>
     <div
       className="panel-divider"

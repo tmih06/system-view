@@ -689,6 +689,47 @@ describe("layoutDiagram: panel composition", () => {
     }
   });
 
+  test("lays panels out in the order the script declares them", async () => {
+    // Declaration order is the reading order: a panel that drifts because ELK
+    // happened to topologically sort it elsewhere is a composition bug, not a
+    // layout preference.
+    const scene = await layoutDiagram(
+      spec({
+        direction: "right",
+        groups: [
+          { id: "third", label: "Third" },
+          { id: "first", label: "First" },
+          { id: "second", label: "Second" },
+        ],
+        nodes: [
+          { id: "c", label: "C", group: "third" },
+          { id: "a", label: "A", group: "first" },
+          { id: "b", label: "B", group: "second" },
+        ],
+        // Edges run backwards on purpose: the topology must not reorder panels.
+        edges: [{ from: "c", to: "b" }, { from: "b", to: "a" }],
+      }),
+      measure,
+    );
+    const placed = ["third", "first", "second"].map((id) => scene.groups.find((group) => group.id === id)!);
+    // Reading order, not strictly left to right: a panel may wrap to the next
+    // row, which is still "after" everything on the row above it.
+    const before = (a: { x: number; y: number }, b: { x: number; y: number }): boolean =>
+      a.y < b.y || (Math.abs(a.y - b.y) < 1 && a.x < b.x);
+    expect(before(placed[0], placed[1])).toBe(true);
+    expect(before(placed[1], placed[2])).toBe(true);
+  });
+
+  test("keeps loose nodes and panels in one declaration ordering", async () => {
+    const scene = await layoutDiagram(club as DiagramSpec, measure);
+    const cf = scene.groups.find((group) => group.id === "cf")!;
+    const clients = scene.nodes.filter((node) => node.id.startsWith("clients."));
+    // The clients are declared before the Cloudflare panel, so the canvas opens
+    // with them rather than pushing them to the last row.
+    const firstClient = Math.min(...clients.map((node) => node.x));
+    expect(firstClient).toBeLessThan(cf.x);
+  });
+
   test("a single panel keeps its own declared direction", async () => {
     const scene = await layoutDiagram(
       spec({

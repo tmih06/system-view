@@ -142,6 +142,77 @@ function sideAtRect(point: Point, rect: Rect): Side {
 }
 
 /**
+ * Pack elements into rows in declaration order.
+ *
+ * A deterministic packer, not a solver, because the canvas composition is an
+ * authoring decision: the panels appear in the order the script lists them, and
+ * the only variable is where a row breaks. Sizing each panel happens in an
+ * earlier pass, so this only has to decide positions.
+ *
+ * Rows fill left to right until the next element would push the row past the
+ * target length, then start a new row. A row is as tall as its tallest member and
+ * every member is top-aligned, which keeps panel headings on a common line.
+ *
+ * @param items Element ids with their measured size, in declaration order.
+ * @param gap Space between neighbours, on both axes.
+ * @param targetAspect Desired width/height of the packed block.
+ * @returns Absolute top-left position of each element, plus the block's extent.
+ */
+function packInOrder(
+  items: Array<{ id: string; width: number; height: number }>,
+  gap: number,
+  targetAspect: number,
+): Map<string, Point> {
+  if (items.length === 0) return new Map();
+
+  /**
+   * Row layout with a cap on how many elements share a row.
+   *
+   * A width limit cannot express this correctly: three equal panels split evenly
+   * in half is `total / 2`, which is less than two panels plus a gap, so every
+   * row would hold one panel and the canvas would grow into a column. Capping the
+   * row *count* instead makes "two per row" directly reachable.
+   */
+  const fillWith = (cap: number): { positions: Map<string, Point>; width: number; height: number } => {
+    const positions = new Map<string, Point>();
+    let x = 0;
+    let y = 0;
+    let rowHeight = 0;
+    let widest = 0;
+    let inRow = 0;
+    for (const item of items) {
+      if (inRow > 0 && inRow >= cap) {
+        widest = Math.max(widest, x - gap);
+        x = 0;
+        y += rowHeight + gap;
+        rowHeight = 0;
+        inRow = 0;
+      }
+      positions.set(item.id, { x, y });
+      x += item.width + gap;
+      rowHeight = Math.max(rowHeight, item.height);
+      inRow += 1;
+    }
+    return { positions, width: Math.max(widest, x - gap), height: y + rowHeight };
+  };
+
+  // Try every cap and keep the canvas closest to the requested aspect. A cap is a
+  // direct, understandable knob ("at most N panels per row"), and the search is
+  // cheap because a canvas has a handful of top-level elements.
+  let best: { positions: Map<string, Point>; width: number; height: number } | undefined;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let cap = 1; cap <= items.length; cap += 1) {
+    const candidate = fillWith(cap);
+    const score = Math.abs(candidate.width / Math.max(1, candidate.height) - targetAspect);
+    if (score < bestScore - 1e-9) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+  return best!.positions;
+}
+
+/**
  * Orthogonal route that treats rectangles as obstacles.
  *
  * Used where ELK cannot help: a connector that crosses a panel border has to
@@ -342,6 +413,22 @@ function routeBetween(start: Point, startSide: Side, end: Point, endSide: Side):
   const midY = Math.round((from.y + to.y) / 2);
   return orthogonalize([from, { x: midX, y: from.y }, { x: midX, y: to.y }, to]);
 }
+
+/**
+ * Target width/height of the packed canvas.
+ *
+ * Slightly landscape, which suits a browser pane. It only decides where a row
+ * breaks; it never stretches a panel.
+ */
+const TARGET_CANVAS_ASPECT = 1.35;
+/** Card-to-card spacing inside a panel. */
+const PANEL_NODE_SPACING = 48;
+/** Layer-to-layer spacing inside a panel; wires run down these channels. */
+const PANEL_LAYER_SPACING = 72;
+/** Clearance between a wire and a card inside a panel. */
+const PANEL_EDGE_NODE_SPACING = 24;
+/** Clearance between two parallel wires inside a panel. */
+const PANEL_EDGE_EDGE_SPACING = 18;
 
 /** Tolerance for treating two coordinates as the same point or the same border. */
 const EPS = 0.75;
@@ -1859,8 +1946,15 @@ async function layoutPanelAlone(
     "elk.direction": DIRECTION_TO_ELK[direction],
     "elk.edgeRouting": "ORTHOGONAL",
     "elk.padding": options.padding,
-    "elk.spacing.nodeNode": String(NODE_SPACING),
-    "elk.layered.spacing.nodeNodeBetweenLayers": String(NODE_SPACING),
+    // Roomier than the per-node spacing: a panel is read as a cluster, and its
+    // internal wires need visible channels between the cards rather than the
+    // hairline gaps that a dense layered layout produces.
+    "elk.spacing.nodeNode": String(PANEL_NODE_SPACING),
+    "elk.layered.spacing.nodeNodeBetweenLayers": String(PANEL_LAYER_SPACING),
+    "elk.spacing.edgeNode": String(PANEL_EDGE_NODE_SPACING),
+    "elk.spacing.edgeEdge": String(PANEL_EDGE_EDGE_SPACING),
+    "elk.layered.spacing.edgeNodeBetweenLayers": String(PANEL_EDGE_NODE_SPACING),
+    "elk.spacing.edgeLabel": String(EDGE_LABEL_SPACING),
     "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
     "elk.edgeLabels.placement": "CENTER",
     "elk.nodeSize.constraints": "[MINIMUM_SIZE]",
@@ -1963,11 +2057,29 @@ async function layoutComposed(
     return parent === undefined ? PERPENDICULAR[diagram.direction] : PERPENDICULAR[directionOf(parent.id)];
   };
 
-  /** Elements directly inside a container, in declaration order. */
-  const membersOf = (container: string | undefined): string[] => [
-    ...groupOrder.filter((group) => group.parent === container).map((group) => `g:${group.id}`),
-    ...diagram.nodes.filter((node) => node.group === container).map((node) => `n:${node.id}`),
-  ];
+  /**
+   * Declaration position of an element, for ordering a container's members.
+   *
+   * A group has no index of its own in the script, so it takes the earliest
+   * position of any card inside it. That is what makes a canvas follow the
+   * script's reading order even when it mixes loose nodes and panels: the
+   * clients declared before Cloudflare stay before Cloudflare.
+   */
+  const declaredAt = (id: string): number => {
+    if (id.startsWith("n:")) return placements.get(id.slice(2))?.node.order ?? Number.MAX_SAFE_INTEGER;
+    const members = subtree.get(id.slice(2));
+    if (members === undefined || members.size === 0) return Number.MAX_SAFE_INTEGER;
+    let earliest = Number.MAX_SAFE_INTEGER;
+    for (const nodeId of members) earliest = Math.min(earliest, placements.get(nodeId)?.node.order ?? earliest);
+    return earliest;
+  };
+
+  /** Elements directly inside a container, in the order the script declares them. */
+  const membersOf = (container: string | undefined): string[] =>
+    [
+      ...groupOrder.filter((group) => group.parent === container).map((group) => `g:${group.id}`),
+      ...diagram.nodes.filter((node) => node.group === container).map((node) => `n:${node.id}`),
+    ].sort((a, b) => declaredAt(a) - declaredAt(b));
 
   const depthOf = (groupId: string): number => {
     let depth = 0;
@@ -2063,19 +2175,28 @@ async function layoutComposed(
     sizes.set(`g:${group.id}`, { x: 0, y: 0, width: interior.width, height: interior.height });
   }
 
-  // --- Pass 2: the canvas places the top-level panels ---
+  // --- Pass 2: place the top-level panels in declaration order ---
   const canvasMembers = membersOf(undefined);
-  const canvasEdges = ownEdges(undefined, canvasMembers);
-  const canvas = await layoutPanelAlone(engine, buildChildren(canvasMembers), canvasEdges, diagram.direction, {
-    padding: paddingExpr(ROOT_PAD, ROOT_PAD, ROOT_PAD),
-    wrap: false,
-    minWidth: 0,
-    minHeight: 0,
+
+  /**
+   * Place the canvas with a packer, not with ELK.
+   *
+   * ELK orders a layer by its topology: a panel whose only edges arrive from
+   * below is pushed to the top of the canvas. That is a fine rule for an abstract
+   * graph and the wrong one for a composed diagram, where a reader expects the
+   * panels in the order the script declares them (clients, then Cloudflare, then
+   * the server it fronts). Declaration order is also what makes the composition
+   * reviewable: a panel that moves should be a diff in the script.
+   */
+  const canvasSizes = canvasMembers.map((id) => {
+    const size = sizes.get(id)!;
+    return { id, width: size.width, height: size.height };
   });
+  const packed = packInOrder(canvasSizes, COMPONENT_SPACING, TARGET_CANVAS_ASPECT);
 
   /** Absolute origin of every element, accumulated from the canvas downward. */
   const origin = new Map<string, Point>();
-  for (const [id, offset] of canvas.members) origin.set(id, offset);
+  for (const [id, position] of packed) origin.set(id, position);
 
   const placeInside = (groupId: string): void => {
     const interior = panels.get(groupId)!;
